@@ -1,0 +1,50 @@
+# =============================================================================
+# Example variable values for the Hub (Platform/Connectivity) deployment.
+# Copy to terraform.tfvars and adjust to your environment.
+# =============================================================================
+
+# --- Required -------------------------------------------------------------
+subscription_id = "00000000-0000-0000-0000-000000000000" # Q2: Connectivity subscription ID
+
+# --- Naming (CAF) ---------------------------------------------------------
+org            = "masuda"    # Q3: organization prefix (confirmed)
+env            = "prod"
+location       = "japaneast"
+location_short = "jpe"
+instance       = "001"
+
+# --- Network (Q4: confirm no overlap with on-prem / existing Azure) --------
+hub_vnet_address_space = ["10.0.0.0/22"]
+subnet_address_prefixes = {
+  GatewaySubnet        = "10.0.0.0/27"
+  AzureFirewallSubnet  = "10.0.0.64/26"
+  AzureBastionSubnet   = "10.0.0.128/26"
+  dnsresolver_inbound  = "10.0.1.0/28"
+  dnsresolver_outbound = "10.0.1.16/28"
+}
+
+# --- Firewall (Q6) --------------------------------------------------------
+firewall_sku_tier = "Standard" # Basic | Standard | Premium
+
+# --- Bastion --------------------------------------------------------------
+bastion_sku = "Standard"
+
+# --- ExpressRoute / VPN Gateway (Q5) --------------------------------------
+deploy_expressroute_gateway = true
+gateway_type                = "ExpressRoute" # ExpressRoute | Vpn
+gateway_sku                 = "ErGw1AZ"      # e.g. ErGw1AZ (ER) / VpnGw1AZ (VPN)
+
+# --- DNS Private Resolver -------------------------------------------------
+deploy_dns_private_resolver = true
+
+# --- DDoS (cost significant) ----------------------------------------------
+deploy_ddos_protection_plan = false
+
+# --- Monitoring (Q8) ------------------------------------------------------
+log_analytics_retention_days = 90
+
+# --- Tags -----------------------------------------------------------------
+tags = {
+  CostCenter = "0000"
+  Owner      = "CCoE"
+}

@@ -1,0 +1,62 @@
+# Azure Hub (Platform / Connectivity) — Terraform
+
+ALZ 準拠 Hub-Spoke トポロジの **Hub サブスクリプション**リソースを Terraform + **Azure Verified Modules (AVM)** でデプロイします。
+設計背景は `../../Azure基盤_IaC設計パラメータ.md` / `../../Azure基盤_IaC設計区分ガイド.md` を参照してください。
+
+## デプロイされるリソース（構成図準拠）
+
+| リソース | 実装 | 備考 |
+|----------|------|------|
+| Resource Group | AVM `avm-res-resources-resourcegroup` | `rg-masuda-hub-prod-jpe-001` |
+| Hub VNet + Subnets | AVM `avm-res-network-virtualnetwork` | Gateway/Firewall/Bastion/DNS Resolver 用サブネット |
+| Azure Firewall + Policy | AVM `avm-res-network-azurefirewall` / `-firewallpolicy` | SKU 可変（Basic/Standard/Premium） |
+| Azure Bastion | AVM `avm-res-network-bastionhost` | Standard SKU |
+| Public IP (Firewall/Bastion) | AVM `avm-res-network-publicipaddress` | Static |
+| Route Table (Spoke egress) | AVM `avm-res-network-routetable` | `0.0.0.0/0 → Firewall Private IP` |
+| Private DNS Zones + VNet Link | AVM `avm-res-network-privatednszone` + 標準 link | PaaS Private Endpoint 用 |
+| DNS Private Resolver | AVM `avm-res-network-dnsresolver` | inbound / outbound endpoint |
+| Log Analytics Workspace | AVM `avm-res-operationalinsights-workspace` | 集中ログ |
+| Key Vault | AVM `avm-res-keyvault-vault` | Hub 共有シークレット |
+| DDoS Protection Plan | AVM `avm-res-network-ddosprotectionplan` | 既定 OFF（コスト大） |
+| ExpressRoute / VPN Gateway | 標準 `azurerm_virtual_network_gateway` | AVM モジュール未提供のため標準リソース。既定 ON |
+
+> **ExpressRoute Gateway** のみ AVM リソースモジュールが未提供のため、標準 `azurerm` リソースで実装しています。他はすべて AVM を利用し作成/運用コストを最小化しています。
+
+## 前提条件
+- Terraform >= 1.10（AVM モジュールのクロス変数バリデーションに必要）
+- Azure CLI (`az login`) もしくは GitHub Actions OIDC
+- Connectivity サブスクリプションへの Contributor 相当権限
+
+## デプロイ手順
+```bash
+cd terraform/hub
+cp terraform.tfvars.example terraform.tfvars   # 値を編集
+terraform init
+terraform plan  -out tfplan
+terraform apply tfplan
+```
+
+### リモート State（推奨）
+本番運用では `providers.tf` の `backend "azurerm"` を有効化し、State 用ストレージアカウントを別途用意してください（Q付録）。
+
+## 命名・タグ
+- 命名：CAF 準拠 `<type>-masuda-hub-<env>-<region>-<instance>`（`org=masuda` 確定）
+- 必須タグ：`Environment` / `Owner` / `CostCenter` / `Workload` / `ManagedBy=Terraform`
+
+## Spoke との接続
+Hub デプロイ後、以下の出力を Spoke 側で利用します。
+- `hub_vnet_id` … VNet Peering 用
+- `firewall_private_ip` … Spoke UDR の next hop
+- `spoke_egress_route_table_id` … Spoke サブネットへ関連付け
+- `private_dns_zone_ids` … Private Endpoint 用ゾーン
+
+## 未確定事項（実装前に確認）
+`terraform.tfvars` の以下は設計書の要確認事項（Q2/Q4/Q5/Q6/Q8）に対応します。既定値は暫定です。
+- `subscription_id`（Q2）
+- `hub_vnet_address_space` / `subnet_address_prefixes`（Q4：オンプレ・既存との重複回避）
+- `deploy_expressroute_gateway` / `gateway_type` / `gateway_sku`（Q5：接続方式・回線）
+- `firewall_sku_tier` / `deploy_ddos_protection_plan`（Q6）
+- `log_analytics_retention_days`（Q8）
+
+## 注意（AVM バージョン）
+各 AVM モジュールは `>= x.y.0, < 1.0.0` で最新の 0.x を取得します。AVM は 1.0 未満で破壊的変更が入り得るため、`terraform init` 後に `.terraform.lock.hcl` を用いてバージョンを固定してください。
