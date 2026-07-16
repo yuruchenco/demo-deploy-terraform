@@ -36,8 +36,29 @@ terraform plan  -out tfplan
 terraform apply tfplan
 ```
 
-### リモート State（推奨）
-本番運用では `providers.tf` の `backend "azurerm"` を有効化し、State 用ストレージアカウントを別途用意してください（Q付録）。
+### リモート State（必須・CI/CD）
+本番運用・CI/CD では `providers.tf` の `backend "azurerm"` を使用します。State 用ストレージは以下の手順でブートストラップしてください。
+
+```bash
+terraform init \
+  -backend-config="resource_group_name=<rg>" \
+  -backend-config="storage_account_name=<sa>" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=hub/connectivity.tfstate"
+```
+
+> **重要（本テナントのポリシー制約）**
+> - ストレージアカウントは **Azure Policy によりパブリックネットワークアクセスが強制的に無効化** されます。State 用ストレージには **Private Endpoint** を構成し、実行環境（**self-hosted runner を Hub VNet 内に配置**）から Private DNS 経由で解決させてください。
+> - **共有キー認証も無効**のため、backend は `use_azuread_auth = true`（Entra ID 認証）を使用します。実行 ID に State ストレージへの `Storage Blob Data Contributor` を付与してください。
+
+### ローカル検証（State ストレージ未整備時）
+Private Endpoint 未整備の段階では、`backend "azurerm"` ブロックを一時的にコメントアウトするか `-backend=false` で `validate` / `plan` を実行できます（apply はローカル State を使う一時作業ディレクトリで実施）。
+
+## CI/CD（GitHub Actions）
+- `.github/workflows/ci.yml` … PR で `fmt -check` → `init` → `validate` → `plan`（成果物 `tfplan.bin` を artifact 化）
+- `.github/workflows/cd.yml` … `main` push もしくは手動実行で `apply`（GitHub Environment `production` の承認ゲート付き）
+- **Enterprise ポリシーで GitHub-hosted runner が無効**のため、両ワークフローとも `runs-on: [self-hosted]`。
+- 認証は **OIDC**（`azure/login@v2`）。必要な Secrets：`AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` / `TFSTATE_RG` / `TFSTATE_SA` / `TFSTATE_CONTAINER`。
 
 ## 命名・タグ
 - 命名：CAF 準拠 `<type>-masuda-hub-<env>-<region>-<instance>`（`org=masuda` 確定）

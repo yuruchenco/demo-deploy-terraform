@@ -1,0 +1,72 @@
+name: CI - Terraform Validate & Plan
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required for Azure OIDC login
+  contents: read
+  pull-requests: write
+
+env:
+  TF_WORKING_DIR: terraform/hub
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  validate-plan:
+    name: Validate & Plan
+    # Enterprise policy disables GitHub-hosted runners -> use self-hosted.
+    runs-on: [self-hosted]
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ">=1.10.0"
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: >-
+          terraform init -input=false
+          -backend-config="resource_group_name=${{ secrets.TFSTATE_RG }}"
+          -backend-config="storage_account_name=${{ secrets.TFSTATE_SA }}"
+          -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}"
+          -backend-config="key=hub/connectivity.tfstate"
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: >-
+          terraform plan -input=false -no-color
+          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          -out=tfplan.bin
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_WORKING_DIR }}/tfplan.bin
+          retention-days: 5
