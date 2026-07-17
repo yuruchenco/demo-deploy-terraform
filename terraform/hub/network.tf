@@ -94,6 +94,7 @@ module "bastion" {
   ip_configuration = {
     name                 = "ipconfig"
     subnet_id            = module.hub_vnet.subnets["AzureBastionSubnet"].resource_id
+    create_public_ip     = false
     public_ip_address_id = module.pip_bastion.resource_id
   }
 
@@ -187,7 +188,7 @@ module "dns_private_resolver" {
 # azurerm resource is used here. Gated by var.deploy_expressroute_gateway.
 ###############################################################################
 resource "azurerm_public_ip" "gateway" {
-  count = var.deploy_expressroute_gateway ? 1 : 0
+  count = var.deploy_expressroute_gateway && var.gateway_type == "Vpn" ? 1 : 0
 
   name                = "pip-vgw-${local.suffix}"
   resource_group_name = module.rg.name
@@ -209,7 +210,7 @@ resource "azurerm_virtual_network_gateway" "this" {
 
   ip_configuration {
     name                          = "vnetGatewayConfig"
-    public_ip_address_id          = azurerm_public_ip.gateway[0].id
+    public_ip_address_id          = var.gateway_type == "Vpn" ? azurerm_public_ip.gateway[0].id : null
     subnet_id                     = module.hub_vnet.subnets["GatewaySubnet"].resource_id
     private_ip_address_allocation = "Dynamic"
   }
