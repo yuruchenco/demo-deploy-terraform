@@ -116,6 +116,12 @@ variable "bastion_sku" {
   default     = "Standard"
 }
 
+variable "bastion_zones" {
+  type        = list(string)
+  description = "Availability zones for Azure Bastion. Leave empty ([]) in regions that do not support Bastion zonal deployment (e.g. japaneast)."
+  default     = []
+}
+
 ###############################################################################
 # ExpressRoute / VPN Gateway
 ###############################################################################

@@ -90,6 +90,7 @@ module "bastion" {
   location  = var.location
   parent_id = module.rg.resource_id
   sku       = var.bastion_sku
+  zones     = var.bastion_zones
 
   ip_configuration = {
     name                 = "ipconfig"
