@@ -64,6 +64,54 @@ Private Endpoint 未整備の段階では、`backend "azurerm"` ブロックを�
 - 命名：CAF 準拠 `<type>-masuda-hub-<env>-<region>-<instance>`（`org=masuda` 確定）
 - 必須タグ：`Environment` / `Owner` / `CostCenter` / `Workload` / `ManagedBy=Terraform`
 
+## Terraform 設定ポリシー（パラメータ定義方針）
+
+本構成は **「値」と「ロジック」を分離** し、環境固有の値は `terraform.tfvars` に集約します。リソース定義（`*.tf`）に値を直書きしないことを原則とします。
+
+### ファイル構成と役割
+
+| ファイル | 役割 | ここに書くもの / 書かないもの |
+|----------|------|--------------------------------|
+| `variables.tf` | 入力変数の**宣言**（型・既定値・説明・`validation`） | 「どんなパラメータを受け付けるか」を定義。環境固有の実値は原則書かない（全環境共通の安全な既定値のみ `default` に置く） |
+| `terraform.tfvars` | 環境ごとの**実パラメータ値** | `subscription_id` / CIDR / SKU / フラグ等の実値。`terraform.tfvars.example` をコピーして作成 |
+| `locals.tf` | 計算値・派生値 | 命名規約の組み立て、タグ合成、subnet マップ等の固定ロジック。通常ユーザーは編集しない |
+| `main.tf` / `network.tf` | リソース定義（AVM モジュール呼び出し） | `var.xxx` を参照するのみ。値そのものは持たない |
+| `outputs.tf` | 出力値 | `firewall_private_ip` 等、Spoke や他スタックへ渡す値 |
+| `providers.tf` | provider / backend 設定 | azurerm バージョン制約・リモート State 設定 |
+
+### パラメータを定義する場所（優先順位）
+
+1. **`terraform.tfvars`（第一選択）** — 環境固有の値はすべてここに集約する。
+   ```hcl
+   subscription_id   = "0a33aa1b-..."
+   firewall_sku_tier = "Standard"
+   bastion_zones     = []   # japaneast は Bastion の AZ 非対応のため空
+   ```
+2. **`variables.tf` の `default`** — 全環境で共通の安全側デフォルトのみ。
+   ```hcl
+   variable "bastion_zones" {
+     type    = list(string)
+     default = []   # 非対応リージョン向けの安全側デフォルト
+   }
+   ```
+3. **CLI 引数（一時的な上書き）** — `-var-file=prod.tfvars` / `-var="env=dev"`。
+4. **CI/CD（GitHub Actions）** — 機密値は `.tfvars` ではなく **Secrets / OIDC**（`ARM_*` 環境変数）で注入する。
+
+### 値の評価順（後勝ち）
+
+```
+variables.tf の default  <  terraform.tfvars  <  *.auto.tfvars  <  -var-file  <  -var / 環境変数(TF_VAR_)
+```
+
+### 運用ルール
+
+- **環境ごとに `.tfvars` を分離**する（例：`prod.tfvars` / `dev.tfvars`）。同一の `*.tf` コードを使い回し、差分は変数値のみとする。
+- **機密情報を含む `.tfvars` は Git 管理しない**（`.gitignore` で `*.tfvars` を除外済み。コミットするのは `terraform.tfvars.example` のみ）。
+- **リソース定義（`*.tf`）に値を直書きしない**。必ず `var.xxx` 経由で参照する。
+- **命名は `locals.tf` の CAF 規約で自動生成**する（`<type>-<org>-hub-<env>-<region>-<instance>`）。個別リソースで名前を直書きしない。
+- **リージョン依存の制約はフラグ/変数で吸収**する（例：`bastion_zones=[]`、`deploy_expressroute_gateway`、`deploy_ddos_protection_plan`）。
+- **AVM モジュールのバージョンは `.terraform.lock.hcl` で固定**する（0.x は破壊的変更が入り得るため）。
+
 ## Spoke との接続
 Hub デプロイ後、以下の出力を Spoke 側で利用します。
 - `hub_vnet_id` … VNet Peering 用
