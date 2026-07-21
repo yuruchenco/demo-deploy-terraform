@@ -33,6 +33,20 @@ ALZ 準拠 Hub-Spoke トポロジの **Hub サブスクリプション**リソ�
 - 対象サブスクリプションへの **Contributor 相当**権限
 - State 用ストレージへの **`Storage Blob Data Contributor`**（共有キー無効環境では Entra ID 認証必須のため）
 
+### 2-1. 使用する Terraform と費用・ライセンス
+
+本構成は **HashiCorp Terraform CLI（コミュニティ版）** を使用します（OpenTofu / HCP Terraform ではありません。State は自前の Azure Storage でセルフマネージド）。
+
+- **Terraform CLI 本体は無料（$0）で利用できます。** ダウンロードして商用利用も可能です。
+- ライセンスは **BSL 1.1**（Business Source License、v1.6 以降）ですが、`azurerm` などの HashiCorp 製プロバイダおよび Azure Verified Modules は引き続き **MPL 2.0（OSS）** です。
+- **一般的な利用（自社／顧客の Azure 基盤を Terraform で構築・運用、CI/CD で回す、コンサルとして顧客環境を構築する）は、すべて許可範囲内で無料です。**
+- BSL 1.1 で唯一制限されるのは、「HashiCorp の有償版と競合する Terraform 製品をホスト／組み込みで提供する」用途のみです。
+
+> 根拠（HashiCorp 公式 License FAQ）:
+> - Q8: *"All non-production uses are permitted. All production uses are allowed other than hosting or embedding the Licensed Work to compete with HashiCorp's paid version of the same Licensed Work, whether hosted or self-managed."*
+> - Q3: *"For end users ... for their internal or personal usage, there is no change."*
+> - 出典: <https://www.hashicorp.com/license-faq>
+
 ---
 
 ## 3. リモート State バックエンドの準備（ポリシー制約環境）
