@@ -1,0 +1,23 @@
+# Target subscription for the policy assignments.
+subscription_id = "0a33aa1b-d8ef-429b-926d-da98db87b7cb"
+
+# Region for the managed identities used by DeployIfNotExists / Modify policies.
+assignment_location = "japaneast"
+
+# Roll out in report-only mode first, then flip to true to enforce Deny /
+# remediation effects once compliance has been reviewed.
+# enforce = false
+
+# Skip specific policies while phasing them in (e.g. Deny "Allowed locations").
+# excluded_policies = [
+#   "e56962a6-4747-49cd-b67b-bf8b01975c4c",
+# ]
+
+# Constrain the "Allowed locations" Deny policy (optional).
+# allowed_locations = ["japaneast", "japanwest"]
+
+# Point the diagnostic-logging DeployIfNotExists policies at a workspace (optional;
+# all policies ship with defaults, so this is only needed to override them).
+# policy_parameters = {
+#   "2465583e-4e78-4c15-b6be-a36cbc7c8b0f" = "{\"logAnalytics\":{\"value\":\"/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<law>\"}}"
+# }
