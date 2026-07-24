@@ -1,5 +1,5 @@
 # Target subscription for the policy assignments.
-subscription_id = "0a33aa1b-d8ef-429b-926d-da98db87b7cb"
+subscription_id = "00000000-0000-0000-0000-000000000000"
 
 # Region for the managed identities used by DeployIfNotExists / Modify policies.
 assignment_location = "japaneast"
