@@ -3,7 +3,7 @@
 ###############################################################################
 module "hub_vnet" {
   source  = "Azure/avm-res-network-virtualnetwork/azurerm"
-  version = ">= 0.8.0, < 1.0.0"
+  version = "0.19.0"
 
   name          = "vnet-${local.suffix}"
   location      = var.location
@@ -18,23 +18,26 @@ module "hub_vnet" {
 ###############################################################################
 module "pip_firewall" {
   source  = "Azure/avm-res-network-publicipaddress/azurerm"
-  version = ">= 0.2.0, < 1.0.0"
+  version = "0.2.1"
 
   name                = "pip-afw-${local.suffix}"
   resource_group_name = module.rg.name
   location            = var.location
   allocation_method   = "Static"
+  ip_tags             = { FirstPartyUsage = "/Unprivileged" }
   tags                = local.tags
 }
 
 module "pip_bastion" {
   source  = "Azure/avm-res-network-publicipaddress/azurerm"
-  version = ">= 0.2.0, < 1.0.0"
+  version = "0.2.1"
 
   name                = "pip-bas-${local.suffix}"
   resource_group_name = module.rg.name
   location            = var.location
   allocation_method   = "Static"
+  zones               = []
+  ip_tags             = { FirstPartyUsage = "/Unprivileged" }
   tags                = local.tags
 }
 
@@ -43,7 +46,7 @@ module "pip_bastion" {
 ###############################################################################
 module "firewall_policy" {
   source  = "Azure/avm-res-network-firewallpolicy/azurerm"
-  version = ">= 0.3.0, < 1.0.0"
+  version = "0.3.4"
 
   name                = "afwp-${local.suffix}"
   resource_group_name = module.rg.name
@@ -53,7 +56,7 @@ module "firewall_policy" {
 
 module "firewall" {
   source  = "Azure/avm-res-network-azurefirewall/azurerm"
-  version = ">= 0.3.0, < 1.0.0"
+  version = "0.4.0"
 
   name                = "afw-${local.suffix}"
   resource_group_name = module.rg.name
@@ -84,7 +87,7 @@ module "firewall" {
 ###############################################################################
 module "bastion" {
   source  = "Azure/avm-res-network-bastionhost/azurerm"
-  version = ">= 0.6.0, < 1.0.0"
+  version = "0.9.0"
 
   name      = "bas-${local.suffix}"
   location  = var.location
@@ -108,7 +111,7 @@ module "bastion" {
 ###############################################################################
 module "route_table_spoke" {
   source  = "Azure/avm-res-network-routetable/azurerm"
-  version = ">= 0.4.0, < 1.0.0"
+  version = "0.5.0"
 
   name                = "route-${var.org}-spoke-egress-${var.env}-${var.location_short}-${var.instance}"
   resource_group_name = module.rg.name
@@ -131,7 +134,7 @@ module "route_table_spoke" {
 ###############################################################################
 module "private_dns_zones" {
   source   = "Azure/avm-res-network-privatednszone/azurerm"
-  version  = ">= 0.3.0, < 1.0.0"
+  version  = "0.5.0"
   for_each = toset(var.private_dns_zones)
 
   domain_name = each.value
@@ -159,7 +162,7 @@ module "dns_private_resolver" {
   count = var.deploy_dns_private_resolver ? 1 : 0
 
   source  = "Azure/avm-res-network-dnsresolver/azurerm"
-  version = ">= 0.7.0, < 1.0.0"
+  version = "0.8.0"
 
   name                        = "dnspr-${local.suffix}"
   resource_group_name         = module.rg.name

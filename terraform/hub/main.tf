@@ -3,7 +3,7 @@
 ###############################################################################
 module "rg" {
   source  = "Azure/avm-res-resources-resourcegroup/azurerm"
-  version = "~> 0.2"
+  version = "0.4.0"
 
   name     = "rg-${local.suffix}"
   location = var.location
@@ -15,7 +15,7 @@ module "rg" {
 ###############################################################################
 module "law" {
   source  = "Azure/avm-res-operationalinsights-workspace/azurerm"
-  version = "~> 0.4"
+  version = "0.5.1"
 
   name                                      = "log-${local.suffix}"
   resource_group_name                       = module.rg.name
@@ -35,13 +35,14 @@ resource "random_string" "kv" {
 
 module "key_vault" {
   source  = "Azure/avm-res-keyvault-vault/azurerm"
-  version = "~> 0.9"
+  version = "0.10.2"
 
   name                = "kv-${var.org}-hub-${random_string.kv.result}"
   resource_group_name = module.rg.name
   location            = var.location
   tenant_id           = data.azurerm_client_config.current.tenant_id
 
+  public_network_access_enabled = false
   network_acls = {
     default_action = "Deny"
     bypass         = "AzureServices"
@@ -64,7 +65,7 @@ module "ddos" {
   count = var.deploy_ddos_protection_plan ? 1 : 0
 
   source  = "Azure/avm-res-network-ddosprotectionplan/azurerm"
-  version = "~> 0.2"
+  version = "0.3.0"
 
   name                = "ddos-${local.suffix}"
   resource_group_name = module.rg.name

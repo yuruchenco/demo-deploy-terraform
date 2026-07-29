@@ -13,36 +13,34 @@ locals {
   # are fixed by Azure and must not be changed.
   subnets = {
     GatewaySubnet = {
-      name             = "GatewaySubnet"
-      address_prefixes = [var.subnet_address_prefixes.GatewaySubnet]
+      name           = "GatewaySubnet"
+      address_prefix = var.subnet_address_prefixes.GatewaySubnet
     }
     AzureFirewallSubnet = {
-      name             = "AzureFirewallSubnet"
-      address_prefixes = [var.subnet_address_prefixes.AzureFirewallSubnet]
+      name           = "AzureFirewallSubnet"
+      address_prefix = var.subnet_address_prefixes.AzureFirewallSubnet
     }
     AzureBastionSubnet = {
-      name             = "AzureBastionSubnet"
-      address_prefixes = [var.subnet_address_prefixes.AzureBastionSubnet]
+      name           = "AzureBastionSubnet"
+      address_prefix = var.subnet_address_prefixes.AzureBastionSubnet
     }
     "snet-dnsresolver-inbound" = {
-      name             = "snet-dnsresolver-inbound"
-      address_prefixes = [var.subnet_address_prefixes.dnsresolver_inbound]
-      delegation = [{
+      name           = "snet-dnsresolver-inbound"
+      address_prefix = var.subnet_address_prefixes.dnsresolver_inbound
+      delegations = [{
         name = "Microsoft.Network.dnsResolvers"
         service_delegation = {
-          name    = "Microsoft.Network/dnsResolvers"
-          actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+          name = "Microsoft.Network/dnsResolvers"
         }
       }]
     }
     "snet-dnsresolver-outbound" = {
-      name             = "snet-dnsresolver-outbound"
-      address_prefixes = [var.subnet_address_prefixes.dnsresolver_outbound]
-      delegation = [{
+      name           = "snet-dnsresolver-outbound"
+      address_prefix = var.subnet_address_prefixes.dnsresolver_outbound
+      delegations = [{
         name = "Microsoft.Network.dnsResolvers"
         service_delegation = {
-          name    = "Microsoft.Network/dnsResolvers"
-          actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+          name = "Microsoft.Network/dnsResolvers"
         }
       }]
     }
