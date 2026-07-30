@@ -92,11 +92,74 @@ locals {
 
   # Built-in convenience parameter wiring for the "Allowed locations" Deny policy.
   allowed_locations_policy_id = "e56962a6-4747-49cd-b67b-bf8b01975c4c"
-  computed_parameters = length(var.allowed_locations) > 0 ? {
+  allowed_locations_parameters = length(var.allowed_locations) > 0 ? {
     (local.allowed_locations_policy_id) = jsonencode({
       listOfAllowedLocations = { value = var.allowed_locations }
     })
   } : {}
+
+  # Built-in DeployIfNotExists policies that require a Log Analytics workspace
+  # resource ID. These parameters have no default value in the definition, so
+  # the assignment MUST supply them or Azure rejects it (MissingPolicyParameter).
+  # Wired centrally to var.log_analytics_workspace_id (typically the hub LAW).
+  log_analytics_policy_ids = [
+    "2465583e-4e78-4c15-b6be-a36cbc7c8b0f", # Configure Azure Activity logs to stream to LAW
+    "b4fe1a3b-0715-4c6c-a5ea-ffc33cf823cb", # Blob Services diag
+    "25a70cc8-2bd4-47f1-90b6-1478e4662c96", # File Services diag
+    "7bd000e3-37c7-4928-9f31-86c4b77c5c45", # Queue Services diag
+    "2fb86bf3-d221-43d1-96d1-2434af34eaa0", # Table Services diag
+    "567c93f7-3661-494f-a30f-0a94d9bfebf8", # API Management
+    "c0d8e23a-47be-4032-961f-8b0ff3957061", # App Service
+    "92012204-a7e4-4a95-bbe5-90d0d3e12735", # Application gateways
+    "aec4c33f-2f2a-4fd3-91cd-24a939513c60", # Azure Cache for Redis
+    "68ba9fc9-71b9-4e6f-9cf5-ecc07722324c", # Cosmos DB
+    "a819f227-229d-44cb-8ad6-25becdb4451f", # Data Explorer
+    "454c7d4b-c141-43f1-8c81-975ebb15a9b5", # Databricks
+    "305408ed-dd5a-43b9-80c1-9eea87a176bb", # Synapse Analytics
+    "f8352124-56fa-4f94-9441-425109cdc14b", # Bastions
+    "415eaa04-e9db-476a-ba43-092d70ebe1e7", # Bot Services
+    "fa570aa1-acca-4eea-8e5a-233cf2c5e4c2", # Caches (Redis Enterprise)
+    "6a664864-e2b5-413e-b930-f11caa132f16", # Container Apps Environments
+    "d111f33e-5cb3-414e-aec4-427e7d1080c9", # Data Lake Analytics
+    "dfe69c56-9c12-4271-9e62-7607ab669582", # Data Lake Storage Gen1
+    "a271e156-b295-4537-b01d-09675d9e7851", # Dedicated SQL pools
+    "6201aeb7-2b5c-4671-8ab4-5d3ba4d77f3b", # Front Door and CDN profiles
+    "a7c668bd-3327-474f-8fb5-8146e3e40e40", # Host pools
+    "6b359d8f-f88d-4052-aa7c-32015963ecc1", # Key vaults
+    "b88bfd90-4da5-43eb-936f-ae1481924291", # Managed HSMs
+    "ae0fc3d3-c9ce-43e8-923a-a143db56d81e", # Cassandra clusters
+    "064a3695-3197-4354-816b-65c7b952db9e", # Mongo clusters
+    "5cfb9e8a-2f13-40bd-a527-c89bc596d299", # ML online endpoints
+    "887dc342-c6bd-418b-9407-ab0e27deba36", # Synapse kusto pools
+    "6567d3f3-42d0-4cfb-9606-9741ba60fa07", # SQL databases
+    "8fc4ca5f-6abc-4b30-9565-0bd91ac49420", # SQL managed instances
+    "0da6faeb-d6c6-4f6e-9f49-06277493270b", # Web PubSub Service
+  ]
+  log_analytics_parameters = var.log_analytics_workspace_id == "" ? {} : {
+    for id in local.log_analytics_policy_ids : id => jsonencode({
+      logAnalytics = { value = var.log_analytics_workspace_id }
+    })
+  }
+
+  # "Keys should have a rotation policy" requires maximumDaysToRotate (no default).
+  key_rotation_policy_id = "d8cf8476-a2ec-4916-896e-992351803c44"
+  key_rotation_parameters = {
+    (local.key_rotation_policy_id) = jsonencode({
+      maximumDaysToRotate = { value = var.max_days_to_rotate }
+    })
+  }
+
+  # Policies whose definition uses a data-plane mode (e.g. Microsoft.KeyVault.Data)
+  # do not support non_compliance_message blocks.
+  no_noncompliance_message_ids = [
+    "d8cf8476-a2ec-4916-896e-992351803c44", # Keys rotation (Microsoft.KeyVault.Data)
+  ]
+
+  computed_parameters = merge(
+    local.allowed_locations_parameters,
+    local.log_analytics_parameters,
+    local.key_rotation_parameters,
+  )
 
   # User-supplied parameter overrides win over computed ones.
   effective_parameters = merge(local.computed_parameters, var.policy_parameters)
@@ -134,8 +197,13 @@ resource "azurerm_subscription_policy_assignment" "this" {
 
   parameters = lookup(local.effective_parameters, each.key, null)
 
-  non_compliance_message {
-    content = "Non-compliant with organizational policy: ${each.value.display}"
+  # Non-compliance messages are not supported for data-plane policy modes
+  # (e.g. Microsoft.KeyVault.Data), so skip the block for those policies.
+  dynamic "non_compliance_message" {
+    for_each = contains(local.no_noncompliance_message_ids, each.key) ? [] : [1]
+    content {
+      content = "Non-compliant with organizational policy: ${each.value.display}"
+    }
   }
 
   # DeployIfNotExists / Modify effects require a managed identity + location.
@@ -153,8 +221,12 @@ resource "azurerm_subscription_policy_assignment" "this" {
 resource "azurerm_role_assignment" "remediation" {
   for_each = local.remediation_roles
 
-  scope              = local.subscription_scope
-  role_definition_id = each.value.role_id
+  scope = local.subscription_scope
+  # Normalize the role definition ID to the subscription-scoped form that Azure
+  # stores, so re-plans stay idempotent (the policy definition data source
+  # returns the tenant-scoped "/providers/..." form, which otherwise diffs and
+  # forces a needless destroy/recreate of every remediation role assignment).
+  role_definition_id = startswith(each.value.role_id, "/subscriptions/") ? each.value.role_id : "${local.subscription_scope}${each.value.role_id}"
   principal_id       = azurerm_subscription_policy_assignment.this[each.value.policy_id].identity[0].principal_id
 
   # The identity is created moments earlier; skip the AAD propagation check.

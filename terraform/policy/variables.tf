@@ -51,3 +51,21 @@ variable "allowed_locations" {
   description = "Value for the 'Allowed locations' (Deny) policy parameter 'listOfAllowedLocations'. Empty list keeps the policy default."
   default     = []
 }
+
+variable "log_analytics_workspace_id" {
+  type        = string
+  description = <<-EOT
+    Resource ID of the central Log Analytics workspace. Wired automatically into
+    the 'logAnalytics' parameter of the 31 built-in DeployIfNotExists diagnostic /
+    logging policies (these have no default value and would otherwise fail with
+    MissingPolicyParameter). Leave empty to skip wiring (those policies will fail
+    unless excluded or supplied via policy_parameters).
+  EOT
+  default     = ""
+}
+
+variable "max_days_to_rotate" {
+  type        = number
+  description = "Value for the 'Keys should have a rotation policy' (d8cf8476) parameter 'maximumDaysToRotate'. Required (no default in the definition)."
+  default     = 90
+}

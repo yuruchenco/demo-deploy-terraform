@@ -8,16 +8,33 @@ assignment_location = "japaneast"
 # remediation effects once compliance has been reviewed.
 # enforce = false
 
-# Skip specific policies while phasing them in (e.g. Deny "Allowed locations").
+# Skip specific policies while phasing them in. The following built-ins require
+# additional infrastructure or privileged role grants and are excluded by default:
+#   - Flow Log policies (cd6f7aff, 3e9965dc) need a storage account + Network Watcher
+#   - Activity log alert policies (b954148f, c5447c04, 3b980d31) need per-alert operationName
+#   - Defender for Servers (5eb6d64a) remediation needs the Owner role, which may be
+#     blocked by an operator ABAC guardrail
 # excluded_policies = [
-#   "e56962a6-4747-49cd-b67b-bf8b01975c4c",
+#   "cd6f7aff-2845-4dab-99f2-6d1754a754b0",
+#   "3e9965dc-cc13-47ca-8259-a4252fd0cf7b",
+#   "b954148f-4c11-4c38-8221-be76711e194a",
+#   "c5447c04-a4d7-4ba8-a263-c9ee321a6858",
+#   "3b980d31-7904-4bb7-8575-5665739a8052",
+#   "5eb6d64a-4086-4d7a-92da-ec51aed0332d",
 # ]
 
 # Constrain the "Allowed locations" Deny policy (optional).
 # allowed_locations = ["japaneast", "japanwest"]
 
-# Point the diagnostic-logging DeployIfNotExists policies at a workspace (optional;
-# all policies ship with defaults, so this is only needed to override them).
+# REQUIRED: central Log Analytics workspace for the 31 diagnostic/logging DINE
+# policies. Their 'logAnalytics' parameter has no default, so this must be set
+# (otherwise those assignments fail with MissingPolicyParameter).
+# log_analytics_workspace_id = "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<law>"
+
+# Key rotation policy (d8cf8476) maximumDaysToRotate. Has no default (defaults to 90 here).
+# max_days_to_rotate = 90
+
+# Optional per-policy parameter overrides (win over the wiring above).
 # policy_parameters = {
 #   "2465583e-4e78-4c15-b6be-a36cbc7c8b0f" = "{\"logAnalytics\":{\"value\":\"/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<law>\"}}"
 # }
