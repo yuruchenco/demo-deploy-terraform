@@ -14,8 +14,11 @@ variable "org" {
 
 variable "env" {
   type        = string
-  description = "Environment token (prod / nonprod / dev)."
-  default     = "prod"
+  description = "Environment token (dev / stg / prd). 既定値は設けない。envs/<env>/terraform.tfvars で必ず明示する。"
+  validation {
+    condition     = contains(["dev", "stg", "prd"], var.env)
+    error_message = "env must be one of: dev, stg, prd."
+  }
 }
 
 variable "location" {
@@ -40,6 +43,50 @@ variable "tags" {
   type        = map(string)
   description = "Additional tags merged onto every resource."
   default     = {}
+}
+
+###############################################################################
+# Feature flags
+#
+# 規約: すべての deploy_* は default = false（安全側）とする。
+# 各環境は envs/<env>/terraform.tfvars で必要なものだけ true にオプトインする。
+# これにより、dev で追加したリソースが prd へ暗黙に波及することを防ぐ。
+#
+# リソースグループと Hub VNet / サブネットは課金が発生しないため常に作成する。
+###############################################################################
+variable "deploy_log_analytics" {
+  type        = bool
+  description = "Whether to deploy the central Log Analytics workspace. false の場合、各リソースの diagnostic_settings も無効化される。"
+  default     = false
+}
+
+variable "deploy_key_vault" {
+  type        = bool
+  description = "Whether to deploy the Hub Key Vault."
+  default     = false
+}
+
+variable "deploy_firewall" {
+  type        = bool
+  description = "Whether to deploy Azure Firewall (+ Firewall Policy + Public IP). 費用が大きい。"
+  default     = false
+}
+
+variable "deploy_bastion" {
+  type        = bool
+  description = "Whether to deploy Azure Bastion (+ Public IP). 費用が大きい。"
+  default     = false
+}
+
+variable "deploy_route_table" {
+  type        = bool
+  description = "Whether to deploy the spoke egress route table. next hop に Firewall の private IP を使うため、deploy_firewall = true が前提。"
+  default     = false
+
+  validation {
+    condition     = var.deploy_route_table ? var.deploy_firewall : true
+    error_message = "deploy_route_table = true requires deploy_firewall = true (next hop needs the firewall private IP)."
+  }
 }
 
 ###############################################################################
@@ -71,21 +118,8 @@ variable "subnet_address_prefixes" {
 
 variable "private_dns_zones" {
   type        = list(string)
-  description = "Private DNS zones to host centrally in the Hub and link to the Hub VNet."
-  default = [
-    "privatelink.blob.core.windows.net",
-    "privatelink.file.core.windows.net",
-    "privatelink.queue.core.windows.net",
-    "privatelink.table.core.windows.net",
-    "privatelink.vaultcore.azure.net",
-    "privatelink.database.windows.net",
-    "privatelink.azurewebsites.net",
-    "privatelink.azurecr.io",
-    "privatelink.monitor.azure.com",
-    "privatelink.oms.opinsights.azure.com",
-    "privatelink.ods.opinsights.azure.com",
-    "privatelink.agentsvc.azure-automation.net",
-  ]
+  description = "Private DNS zones to host centrally in the Hub and link to the Hub VNet. 既定は空。必要なゾーンを envs/<env>/terraform.tfvars で明示的に指定する。"
+  default     = []
 }
 
 ###############################################################################
@@ -127,8 +161,8 @@ variable "bastion_zones" {
 ###############################################################################
 variable "deploy_expressroute_gateway" {
   type        = bool
-  description = "Whether to deploy an ExpressRoute Virtual Network Gateway (design item Q5)."
-  default     = true
+  description = "Whether to deploy an ExpressRoute Virtual Network Gateway (design item Q5). 作成に30-45分かかり費用も大きい。"
+  default     = false
 }
 
 variable "gateway_type" {
@@ -153,7 +187,7 @@ variable "gateway_sku" {
 variable "deploy_dns_private_resolver" {
   type        = bool
   description = "Whether to deploy the Azure DNS Private Resolver with inbound/outbound endpoints."
-  default     = true
+  default     = false
 }
 
 ###############################################################################

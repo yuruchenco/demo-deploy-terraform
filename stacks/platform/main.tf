@@ -14,6 +14,8 @@ module "rg" {
 # Monitoring - Central Log Analytics Workspace
 ###############################################################################
 module "law" {
+  count = var.deploy_log_analytics ? 1 : 0
+
   source  = "Azure/avm-res-operationalinsights-workspace/azurerm"
   version = "0.5.1"
 
@@ -34,6 +36,8 @@ resource "random_string" "kv" {
 }
 
 module "key_vault" {
+  count = var.deploy_key_vault ? 1 : 0
+
   source  = "Azure/avm-res-keyvault-vault/azurerm"
   version = "0.10.2"
 
@@ -48,12 +52,7 @@ module "key_vault" {
     bypass         = "AzureServices"
   }
 
-  diagnostic_settings = {
-    toLaw = {
-      name                  = "toLogAnalytics"
-      workspace_resource_id = module.law.resource_id
-    }
-  }
+  diagnostic_settings = local.diagnostic_settings
 
   tags = local.tags
 }

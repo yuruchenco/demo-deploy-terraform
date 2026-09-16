@@ -1,0 +1,156 @@
+###############################################################################
+# OIDC / GitHub-hosted runner 検証ワークフロー
+#
+# 検証目的:
+#   1. OIDC (Workload Identity Federation) により、
+#      GitHub 側にシークレットを一切保存せずに Azure へ認証できること
+#   2. GitHub-hosted runner (ubuntu-latest) から、
+#      検証(stg) と 本番(prd) の両環境に対して実行できること
+#
+# 重要な設計ポイント:
+#   - 認証情報は Environment *variables* のみ（secrets は未使用）。
+#     client ID / tenant ID / subscription ID はいずれも機密ではない。
+#     パスワードや証明書に相当するものは存在しない。
+#   - `environment:` は job 単位でしか指定できないため、
+#     1 環境 = 1 job とする。これにより環境ごとの承認ゲートが機能する。
+#   - OIDC の subject は
+#       repo:<OWNER>/<REPO>:environment:<ENVIRONMENT NAME>
+#     となる。Entra 側のフェデレーション資格情報をこの subject で
+#     登録することで、「その Environment を経由した実行だけが
+#     そのサブスクリプションに触れる」ことを Entra 側で強制できる。
+#
+# 既知の制約:
+#   本テナントではポリシーによりストレージアカウントの
+#   publicNetworkAccess が強制的に Disabled にされるため、
+#   azurerm backend (リモート state) へは GitHub-hosted runner から
+#   到達できない。そのため本ワークフローでは backend を使わず、
+#   ジョブ内で完結するローカル state で検証する。
+#   リモート state を使う本番構成では self-hosted runner もしくは
+#   Azure Private Networking 対応の larger runner が必要になる。
+###############################################################################
+name: verify-oidc
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_apply:
+        description: "apply と destroy まで実行する（既定は plan まで）"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "stacks/**"
+      - ".github/workflows/verify-oidc.yml"
+
+# OIDC トークンの発行に必須。これが無いと id-token が取得できない。
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    name: ${{ matrix.env }} / ${{ matrix.stack }}
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.env }}-${{ matrix.stack }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: stg
+            stack: platform
+          - env: prd
+            stack: platform
+
+    defaults:
+      run:
+        working-directory: stacks/${{ matrix.stack }}
+
+    env:
+      # azurerm provider を OIDC で動かすための設定。
+      # クライアントシークレットも証明書も指定していない点に注目。
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.ARM_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.ARM_SUBSCRIPTION_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: シークレットが設定されていないことを確認
+        run: |
+          echo "この job が参照している認証情報は Environment variables のみです。"
+          echo "ARM_CLIENT_ID       = ${ARM_CLIENT_ID}"
+          echo "ARM_TENANT_ID       = ${ARM_TENANT_ID}"
+          echo "ARM_SUBSCRIPTION_ID = ${ARM_SUBSCRIPTION_ID}"
+          echo "ARM_CLIENT_SECRET   = '${ARM_CLIENT_SECRET:-(未設定)}'"
+          if [ -n "${ARM_CLIENT_SECRET:-}" ]; then
+            echo "::error::ARM_CLIENT_SECRET が設定されています。OIDC 検証の前提が崩れます。"
+            exit 1
+          fi
+
+      - name: Azure へ OIDC でログイン
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.ARM_CLIENT_ID }}
+          tenant-id: ${{ vars.ARM_TENANT_ID }}
+          subscription-id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+
+      - name: ログインできたことを確認
+        run: |
+          az account show -o json
+          echo "---"
+          echo "この runner が使用しているのは GitHub が発行した短命の OIDC トークンです。"
+          echo "runner image: ${ImageOS:-unknown} / hosted"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.4"
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      # backend を使わずローカル state で初期化する。
+      #
+      # versions.tf の backend "azurerm" は、本テナントのポリシーにより
+      # GitHub-hosted runner からは到達できない。
+      # Terraform は *_override.tf を後勝ちでマージするため、
+      # ここでローカルバックエンドに差し替える。
+      #
+      # 本番構成（self-hosted / private larger runner）では
+      # この override を作らず、代わりに
+      #   terraform init -reconfigure -input=false \
+      #     -backend-config=envs/<env>/backend.hcl
+      # を実行する。
+      - name: ローカルバックエンドへ差し替え
+        run: |
+          cat > local_override.tf <<'EOF'
+          terraform {
+            backend "local" {}
+          }
+          EOF
+
+      - name: terraform init
+        run: terraform init -reconfigure -input=false
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: terraform plan
+        run: |
+          terraform plan -input=false \
+            -var-file=envs/${{ matrix.env }}/terraform.tfvars \
+            -out=tfplan
+
+      - name: terraform apply
+        if: ${{ inputs.run_apply }}
+        run: terraform apply -input=false -auto-approve tfplan
+
+      # apply した場合は必ず後片付けする。
+      # 失敗しても実行されるよう always() を使う。
+      - name: terraform destroy (後片付け)
+        if: ${{ always() && inputs.run_apply }}
+        run: |
+          terraform destroy -input=false -auto-approve \
+            -var-file=envs/${{ matrix.env }}/terraform.tfvars

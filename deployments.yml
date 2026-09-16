@@ -1,0 +1,44 @@
+###############################################################################
+# デプロイ対象の一覧（スタック × 環境）
+#
+# CI/CD のマトリクスはこのファイルから生成する。
+# ワークフロー側にハードコードしないことで、
+# 「どのスタックがどの環境に存在するか」の正本を 1 箇所に保つ。
+#
+# 環境を増やす／スタックを増やす場合は、ここに追記したうえで
+# 対応する stacks/<stack>/envs/<env>/ を作成すること。
+#
+# environment: GitHub Environment 名。承認ゲートはここに設定する。
+#              environment は job 単位でしか指定できないため、
+#              1 デプロイ = 1 job とする。
+###############################################################################
+deployments:
+  - stack: platform
+    env: dev
+    environment: dev-platform
+    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
+
+  - stack: platform
+    env: stg
+    environment: stg-platform
+    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
+
+  - stack: platform
+    env: prd
+    environment: prd-platform
+    subscription_id: 0a33aa1b-d8ef-429b-926d-da98db87b7cb
+
+  - stack: policy
+    env: dev
+    environment: dev-policy
+    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
+
+  - stack: policy
+    env: stg
+    environment: stg-policy
+    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
+
+  - stack: policy
+    env: prd
+    environment: prd-policy
+    subscription_id: 0a33aa1b-d8ef-429b-926d-da98db87b7cb

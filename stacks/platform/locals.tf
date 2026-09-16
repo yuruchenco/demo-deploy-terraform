@@ -2,6 +2,25 @@ locals {
   # CAF-aligned naming: <type>-<org>-hub-<env>-<region>-<instance>
   suffix = "${var.org}-hub-${var.env}-${var.location_short}-${var.instance}"
 
+  # Log Analytics はフィーチャーフラグで任意化しているため、
+  # count = 0 のときは one() が null を返す。
+  law_workspace_id = one(module.law[*].resource_id)
+
+  # diagnostic_settings は LAW が存在する環境でのみ有効化する。
+  #
+  # 重要: 分岐条件には必ず var.deploy_log_analytics（plan 時点で確定する入力）を使い、
+  # local.law_workspace_id（apply 時まで未確定）を使ってはならない。
+  # 後者を条件にすると map のキー自体が unknown となり、
+  # AVM モジュール内部の for_each = var.diagnostic_settings が
+  # "Invalid for_each argument" で失敗する。
+  # unknown な値はキーではなく値側にのみ置くこと。
+  diagnostic_settings = var.deploy_log_analytics ? {
+    toLaw = {
+      name                  = "toLogAnalytics"
+      workspace_resource_id = one(module.law[*].resource_id)
+    }
+  } : {}
+
   tags = merge({
     Environment = var.env
     Workload    = "hub-connectivity"

@@ -1,72 +1,124 @@
-name: CI - Terraform Validate & Plan
+###############################################################################
+# CI: Pull Request 時の検証
+#
+# 対象: deployments.yml に定義されたすべての スタック × 環境
+#
+# 実行内容: fmt / validate / plan
+# plan 結果は PR 上でレビューし、影響範囲と差分を確認したうえでマージする。
+#
+# Runner について:
+#   runs-on はリポジトリ変数 RUNNER_LABEL で切り替える。
+#     初期フェーズ : ubuntu-latest（GitHub-hosted / パブリックアクセス）
+#     本番運用     : larger runner のラベル（Azure Private Networking 経由）
+#   移行はこの変数を変えるだけでよく、ワークフローの書き換えは不要。
+#   ただし、リモート state へ到達するには private 化が前提になる点に注意。
+###############################################################################
+name: ci
 
 on:
   pull_request:
-    branches: [main]
     paths:
-      - "terraform/**"
+      - "stacks/**"
+      - "deployments.yml"
       - ".github/workflows/ci.yml"
-  workflow_dispatch:
 
 permissions:
-  id-token: write   # required for Azure OIDC login
   contents: read
+  id-token: write
   pull-requests: write
 
-env:
-  TF_WORKING_DIR: terraform/hub
-  ARM_USE_OIDC: "true"
-  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  validate-plan:
-    name: Validate & Plan
-    # Enterprise policy disables GitHub-hosted runners -> use self-hosted.
-    runs-on: [self-hosted]
+  # deployments.yml を正本としてマトリクスを生成する。
+  # ワークフロー側に対象を二重定義しないための仕組み。
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        run: |
+          matrix=$(yq -o=json -I=0 '.deployments' deployments.yml)
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "${matrix}"
+
+  plan:
+    needs: discover
+    name: plan ${{ matrix.env }}/${{ matrix.stack }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+
+    # Environment を指定することで、OIDC の subject が
+    #   repo:<OWNER>/<REPO>:environment:<environment>
+    # となり、Entra 側で「どの Environment からの実行か」を強制できる。
+    # plan 用の Environment には承認ゲートを設定しない（読み取りのみのため）。
+    environment: ${{ matrix.environment }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.discover.outputs.matrix) }}
+
     defaults:
       run:
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: stacks/${{ matrix.stack }}
+
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.ARM_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ matrix.subscription_id }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ">=1.10.0"
+          terraform_version: "1.14.4"
+          terraform_wrapper: false
 
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Terraform Format Check
+      - name: terraform fmt
         run: terraform fmt -check -recursive
 
-      - name: Terraform Init
-        run: >-
-          terraform init -input=false
-          -backend-config="resource_group_name=${{ secrets.TFSTATE_RG }}"
-          -backend-config="storage_account_name=${{ secrets.TFSTATE_SA }}"
-          -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}"
-          -backend-config="key=hub/connectivity.tfstate"
+      # -reconfigure は必須。
+      # 付けないと Terraform が既存 state のコピー可否を尋ね、
+      # 環境をまたいだ state 上書き事故の原因になる。
+      - name: terraform init
+        run: |
+          terraform init -reconfigure -input=false \
+            -backend-config=envs/${{ matrix.env }}/backend.hcl
 
-      - name: Terraform Validate
+      - name: terraform validate
         run: terraform validate
 
-      - name: Terraform Plan
-        run: >-
-          terraform plan -input=false -no-color
-          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}"
-          -out=tfplan.bin
+      - name: terraform plan
+        id: plan
+        run: |
+          terraform plan -input=false -no-color \
+            -var-file=envs/${{ matrix.env }}/terraform.tfvars \
+            -out=tfplan 2>&1 | tee plan.txt
+          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Plan Artifact
-        uses: actions/upload-artifact@v4
+      # plan の中身は環境情報を含むため、成果物としては保持せず
+      # PR コメントの要約のみに留める運用も検討すること。
+      - name: plan 要約を PR にコメント
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
         with:
-          name: tfplan
-          path: ${{ env.TF_WORKING_DIR }}/tfplan.bin
-          retention-days: 5
+          script: |
+            const fs = require('fs');
+            const path = 'stacks/${{ matrix.stack }}/plan.txt';
+            let body = fs.readFileSync(path, 'utf8');
+            const limit = 60000;
+            if (body.length > limit) {
+              body = body.slice(-limit);
+            }
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### plan: \`${{ matrix.env }}/${{ matrix.stack }}\`\n\n<details><summary>結果を表示</summary>\n\n\`\`\`hcl\n${body}\n\`\`\`\n\n</details>`
+            });

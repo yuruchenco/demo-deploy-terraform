@@ -17,6 +17,8 @@ module "hub_vnet" {
 # Public IPs (Firewall, Bastion)
 ###############################################################################
 module "pip_firewall" {
+  count = var.deploy_firewall ? 1 : 0
+
   source  = "Azure/avm-res-network-publicipaddress/azurerm"
   version = "0.2.1"
 
@@ -29,6 +31,8 @@ module "pip_firewall" {
 }
 
 module "pip_bastion" {
+  count = var.deploy_bastion ? 1 : 0
+
   source  = "Azure/avm-res-network-publicipaddress/azurerm"
   version = "0.2.1"
 
@@ -45,6 +49,8 @@ module "pip_bastion" {
 # Azure Firewall + Firewall Policy
 ###############################################################################
 module "firewall_policy" {
+  count = var.deploy_firewall ? 1 : 0
+
   source  = "Azure/avm-res-network-firewallpolicy/azurerm"
   version = "0.3.4"
 
@@ -55,6 +61,8 @@ module "firewall_policy" {
 }
 
 module "firewall" {
+  count = var.deploy_firewall ? 1 : 0
+
   source  = "Azure/avm-res-network-azurefirewall/azurerm"
   version = "0.4.0"
 
@@ -64,20 +72,15 @@ module "firewall" {
   firewall_sku_name   = "AZFW_VNet"
   firewall_sku_tier   = var.firewall_sku_tier
   firewall_zones      = var.firewall_zones
-  firewall_policy_id  = module.firewall_policy.resource_id
+  firewall_policy_id  = module.firewall_policy[0].resource_id
 
   firewall_ip_configuration = [{
     name                 = "ipconfig1"
     subnet_id            = module.hub_vnet.subnets["AzureFirewallSubnet"].resource_id
-    public_ip_address_id = module.pip_firewall.resource_id
+    public_ip_address_id = module.pip_firewall[0].resource_id
   }]
 
-  diagnostic_settings = {
-    toLaw = {
-      name                  = "toLogAnalytics"
-      workspace_resource_id = module.law.resource_id
-    }
-  }
+  diagnostic_settings = local.diagnostic_settings
 
   tags = local.tags
 }
@@ -86,6 +89,8 @@ module "firewall" {
 # Azure Bastion
 ###############################################################################
 module "bastion" {
+  count = var.deploy_bastion ? 1 : 0
+
   source  = "Azure/avm-res-network-bastionhost/azurerm"
   version = "0.9.0"
 
@@ -99,7 +104,7 @@ module "bastion" {
     name                 = "ipconfig"
     subnet_id            = module.hub_vnet.subnets["AzureBastionSubnet"].resource_id
     create_public_ip     = false
-    public_ip_address_id = module.pip_bastion.resource_id
+    public_ip_address_id = module.pip_bastion[0].resource_id
   }
 
   tags = local.tags
@@ -110,6 +115,8 @@ module "bastion" {
 # Associated to spoke subnets when spokes are deployed. Exposed via outputs.
 ###############################################################################
 module "route_table_spoke" {
+  count = var.deploy_route_table ? 1 : 0
+
   source  = "Azure/avm-res-network-routetable/azurerm"
   version = "0.5.0"
 
@@ -122,7 +129,7 @@ module "route_table_spoke" {
       name                   = "default-to-firewall"
       address_prefix         = "0.0.0.0/0"
       next_hop_type          = "VirtualAppliance"
-      next_hop_in_ip_address = module.firewall.resource.ip_configuration[0].private_ip_address
+      next_hop_in_ip_address = module.firewall[0].resource.ip_configuration[0].private_ip_address
     }
   }
 

@@ -1,71 +1,98 @@
-name: CD - Terraform Apply
+###############################################################################
+# CD: main マージ時の反映
+#
+# 方針:
+#   - main ブランチを正本とし、マージを契機に反映する
+#   - dev → stg → prd の順に段階適用する（前段が成功しないと次へ進まない）
+#   - prd の Environment には required reviewers を設定し、手動承認を必須とする
+#   - 承認画面で plan 結果を確認してから apply する
+#
+# `environment:` は job 単位でしか指定できない。
+# したがって 1 デプロイ = 1 job とし、まとめて 1 job で回してはならない。
+# まとめると環境ごとの承認ゲートが機能しなくなる。
+#
+# Runner はリポジトリ変数 RUNNER_LABEL で切り替える。
+# リモート state (azurerm backend) に到達するには private 化が前提。
+###############################################################################
+name: cd
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - "terraform/**"
+      - "stacks/**"
+      - "deployments.yml"
       - ".github/workflows/cd.yml"
   workflow_dispatch:
-    inputs:
-      confirm:
-        description: 'Type "apply" to confirm deployment'
-        required: true
-        default: ""
 
 permissions:
-  id-token: write   # required for Azure OIDC login
   contents: read
+  id-token: write
 
-env:
-  TF_WORKING_DIR: terraform/hub
-  ARM_USE_OIDC: "true"
-  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+# 同一環境への同時 apply を防ぐ。
+# state のロック競合や、意図しない順序での反映を避けるため。
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
 
 jobs:
-  apply:
-    name: Apply
-    # Enterprise policy disables GitHub-hosted runners -> use self-hosted.
-    runs-on: [self-hosted]
-    # Requires a GitHub Environment named "production" with required reviewers
-    # configured for a manual approval gate before apply.
-    environment: production
-    defaults:
-      run:
-        working-directory: ${{ env.TF_WORKING_DIR }}
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      dev: ${{ steps.build.outputs.dev }}
+      stg: ${{ steps.build.outputs.stg }}
+      prd: ${{ steps.build.outputs.prd }}
     steps:
-      - name: Guard - workflow_dispatch confirmation
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm != 'apply'
+      - uses: actions/checkout@v4
+      - id: build
         run: |
-          echo "Confirmation input was not 'apply'. Aborting."
-          exit 1
+          for e in dev stg prd; do
+            m=$(yq -o=json -I=0 "[.deployments[] | select(.env == \"$e\")]" deployments.yml)
+            echo "$e=$m" >> "$GITHUB_OUTPUT"
+            echo "$e -> $m"
+          done
 
-      - name: Checkout
-        uses: actions/checkout@v4
+  apply-dev:
+    needs: discover
+    name: apply dev/${{ matrix.stack }}
+    uses: ./.github/workflows/_terraform-apply.yml
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJson(needs.discover.outputs.dev) }}
+    with:
+      stack: ${{ matrix.stack }}
+      env_name: ${{ matrix.env }}
+      environment: ${{ matrix.environment }}
+      subscription_id: ${{ matrix.subscription_id }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ">=1.10.0"
+  apply-stg:
+    needs: [discover, apply-dev]
+    name: apply stg/${{ matrix.stack }}
+    uses: ./.github/workflows/_terraform-apply.yml
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJson(needs.discover.outputs.stg) }}
+    with:
+      stack: ${{ matrix.stack }}
+      env_name: ${{ matrix.env }}
+      environment: ${{ matrix.environment }}
+      subscription_id: ${{ matrix.subscription_id }}
 
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Terraform Init
-        run: >-
-          terraform init -input=false
-          -backend-config="resource_group_name=${{ secrets.TFSTATE_RG }}"
-          -backend-config="storage_account_name=${{ secrets.TFSTATE_SA }}"
-          -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}"
-          -backend-config="key=hub/connectivity.tfstate"
-
-      - name: Terraform Apply
-        run: >-
-          terraform apply -input=false -auto-approve
-          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+  # prd の Environment 側に required reviewers を設定しておくこと。
+  # ここに到達した時点で job が待機状態になり、承認されるまで apply されない。
+  apply-prd:
+    needs: [discover, apply-stg]
+    name: apply prd/${{ matrix.stack }}
+    uses: ./.github/workflows/_terraform-apply.yml
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJson(needs.discover.outputs.prd) }}
+    with:
+      stack: ${{ matrix.stack }}
+      env_name: ${{ matrix.env }}
+      environment: ${{ matrix.environment }}
+      subscription_id: ${{ matrix.subscription_id }}

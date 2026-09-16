@@ -11,8 +11,15 @@ variable "assignment_location" {
 
 variable "enforce" {
   type        = bool
-  description = "Enforcement mode for all assignments. true = Default (effects enforced), false = DoNotEnforce (evaluate/report only, no Deny or remediation deploy)."
-  default     = true
+  description = <<-EOT
+    Enforcement mode for all assignments. true = Default (effects enforced),
+    false = DoNotEnforce (evaluate/report only, no Deny or remediation deploy).
+
+    既定は false（安全側）。Deny / DeployIfNotExists が既存環境を
+    いきなり止めることを防ぐため、まず DoNotEnforce で影響を観測し、
+    環境ごとに envs/<env>/terraform.tfvars で明示的に true へ切り替える。
+  EOT
+  default     = false
 }
 
 variable "excluded_policies" {
