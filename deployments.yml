@@ -5,19 +5,22 @@
 # ワークフロー側にハードコードしないことで、
 # 「どのスタックがどの環境に存在するか」の正本を 1 箇所に保つ。
 #
-# 環境を増やす／スタックを増やす場合は、ここに追記したうえで
-# 対応する stacks/<stack>/envs/<env>/ を作成すること。
+# 追加する際の手順:
+#   1. stacks/<stack>/envs/<env>/ に terraform.tfvars と backend.hcl を作る
+#   2. GitHub Environment を 2 つ作る
+#        <env>-<stack>-plan   … 承認ゲートなし。SP は Reader 相当。
+#        <env>-<stack>        … 本番は承認ゲートあり。SP は Contributor。
+#   3. Entra 側に上記 2 つの subject でフェデレーション資格情報を登録する
+#        repo:<OWNER>/<REPO>:environment:<Environment 名>
+#   4. 各 Environment に variables を設定する
+#        ARM_CLIENT_ID / ARM_TENANT_ID / ARM_SUBSCRIPTION_ID
+#      いずれも secrets ではなく variables でよい（機密情報ではないため）
+#   5. このファイルに追記する
 #
-# environment: GitHub Environment 名。承認ゲートはここに設定する。
-#              environment は job 単位でしか指定できないため、
-#              1 デプロイ = 1 job とする。
+# 上記が揃っていない スタック × 環境 をここに書くと、
+# OIDC の subject が一致せず CI が失敗する。
 ###############################################################################
 deployments:
-  - stack: platform
-    env: dev
-    environment: dev-platform
-    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
-
   - stack: platform
     env: stg
     environment: stg-platform
@@ -28,17 +31,26 @@ deployments:
     environment: prd-platform
     subscription_id: 0a33aa1b-d8ef-429b-926d-da98db87b7cb
 
-  - stack: policy
-    env: dev
-    environment: dev-policy
-    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
-
-  - stack: policy
-    env: stg
-    environment: stg-policy
-    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
-
-  - stack: policy
-    env: prd
-    environment: prd-policy
-    subscription_id: 0a33aa1b-d8ef-429b-926d-da98db87b7cb
+###############################################################################
+# 以下は設定が整い次第、順次有効化する。
+#
+#  - stack: platform
+#    env: dev
+#    environment: dev-platform
+#    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
+#
+#  - stack: policy
+#    env: dev
+#    environment: dev-policy
+#    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
+#
+#  - stack: policy
+#    env: stg
+#    environment: stg-policy
+#    subscription_id: 7b0d56d6-0b9c-4ec4-82bb-98232df5db5b
+#
+#  - stack: policy
+#    env: prd
+#    environment: prd-policy
+#    subscription_id: 0a33aa1b-d8ef-429b-926d-da98db87b7cb
+###############################################################################

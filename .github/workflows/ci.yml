@@ -8,10 +8,17 @@
 #
 # Runner について:
 #   runs-on はリポジトリ変数 RUNNER_LABEL で切り替える。
-#     初期フェーズ : ubuntu-latest（GitHub-hosted / パブリックアクセス）
+#   RUNNER_LABEL は必ず *リポジトリレベル* の変数として定義すること。
+#   Environment レベルに置くと、reusable workflow から参照した際に
+#   runs-on の評価タイミングで解決されず、
+#   黙って ubuntu-latest にフォールバックする。
+#     初期フェーズ : 未設定（= ubuntu-latest / GitHub-hosted）
 #     本番運用     : larger runner のラベル（Azure Private Networking 経由）
 #   移行はこの変数を変えるだけでよく、ワークフローの書き換えは不要。
-#   ただし、リモート state へ到達するには private 化が前提になる点に注意。
+#
+# state について:
+#   リモート state (azurerm backend) に到達するには runner の private 化が前提。
+#   既定ではローカル state で plan する。詳細は init ステップのコメントを参照。
 ###############################################################################
 name: ci
 
@@ -54,8 +61,14 @@ jobs:
     # Environment を指定することで、OIDC の subject が
     #   repo:<OWNER>/<REPO>:environment:<environment>
     # となり、Entra 側で「どの Environment からの実行か」を強制できる。
-    # plan 用の Environment には承認ゲートを設定しない（読み取りのみのため）。
-    environment: ${{ matrix.environment }}
+    #
+    # plan 用には apply 用とは別の Environment (<env>-<stack>-plan) を使う。
+    # 同じ Environment を使うと、本番の承認ゲートが PR の plan 時点で
+    # 発火してしまい、レビュー前に承認を求められることになる。
+    # 本番運用では、この plan 用 Environment に紐づく SP は
+    # Reader + state ストレージへの Storage Blob Data Contributor に留め、
+    # 書き込み権限を持たせないこと。
+    environment: ${{ matrix.environment }}-plan
 
     strategy:
       fail-fast: false
@@ -83,13 +96,33 @@ jobs:
       - name: terraform fmt
         run: terraform fmt -check -recursive
 
-      # -reconfigure は必須。
-      # 付けないと Terraform が既存 state のコピー可否を尋ね、
-      # 環境をまたいだ state 上書き事故の原因になる。
-      - name: terraform init
+      # state バックエンドの扱い
+      #
+      # 本テナントではポリシーによりストレージアカウントの
+      # publicNetworkAccess が強制的に Disabled にされるため、
+      # GitHub-hosted runner からは azurerm backend に到達できない。
+      #
+      # そのため既定ではローカル state で plan する（差分の確認はできる）。
+      # private runner を用意してリモート state を使う段階になったら、
+      # リポジトリ変数 USE_REMOTE_STATE = "true" を設定する。
+      # ワークフローの書き換えは不要。
+      - name: terraform init (リモート state)
+        if: ${{ vars.USE_REMOTE_STATE == 'true' }}
         run: |
           terraform init -reconfigure -input=false \
             -backend-config=envs/${{ matrix.env }}/backend.hcl
+
+      - name: terraform init (ローカル state / 既定)
+        if: ${{ vars.USE_REMOTE_STATE != 'true' }}
+        run: |
+          echo "::notice::USE_REMOTE_STATE が未設定のため、ローカル state で plan します。"
+          echo "::notice::リモート state を使うには private runner の用意が必要です。"
+          cat > local_override.tf <<'EOF'
+          terraform {
+            backend "local" {}
+          }
+          EOF
+          terraform init -reconfigure -input=false
 
       - name: terraform validate
         run: terraform validate

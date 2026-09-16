@@ -51,7 +51,7 @@ jobs:
   verify:
     name: ${{ matrix.env }} / ${{ matrix.stack }}
     runs-on: ubuntu-latest
-    environment: ${{ matrix.env }}-${{ matrix.stack }}
+    environment: ${{ matrix.env }}-${{ matrix.stack }}-plan
 
     strategy:
       fail-fast: false
@@ -144,13 +144,18 @@ jobs:
             -out=tfplan
 
       - name: terraform apply
-        if: ${{ inputs.run_apply }}
+        id: apply
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_apply }}
         run: terraform apply -input=false -auto-approve tfplan
 
-      # apply した場合は必ず後片付けする。
-      # 失敗しても実行されるよう always() を使う。
+      # apply を実際に行った場合のみ後片付けする。
+      #
+      # always() だけで判定すると、ログインや plan が失敗して
+      # apply がスキップされた場合にも destroy が走り、
+      # 空または不完全な state に対して destroy を実行してしまう。
+      # apply ステップが skipped でないことを条件に加えてそれを防ぐ。
       - name: terraform destroy (後片付け)
-        if: ${{ always() && inputs.run_apply }}
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.run_apply && steps.apply.conclusion != 'skipped' }}
         run: |
           terraform destroy -input=false -auto-approve \
             -var-file=envs/${{ matrix.env }}/terraform.tfvars
