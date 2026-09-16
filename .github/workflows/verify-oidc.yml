@@ -30,6 +30,9 @@
 ###############################################################################
 name: verify-oidc
 
+# 検証用のため手動実行のみとする。
+# pull_request で起動すると ci.yml と二重に plan が走り、
+# どちらの結果を見ればよいか分からなくなる。
 on:
   workflow_dispatch:
     inputs:
@@ -37,10 +40,6 @@ on:
         description: "apply と destroy まで実行する（既定は plan まで）"
         type: boolean
         default: false
-  pull_request:
-    paths:
-      - "stacks/**"
-      - ".github/workflows/verify-oidc.yml"
 
 # OIDC トークンの発行に必須。これが無いと id-token が取得できない。
 permissions:
