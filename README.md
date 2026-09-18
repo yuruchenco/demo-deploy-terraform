@@ -87,6 +87,19 @@ larger runner** へ移行し、リポジトリ変数 `NSP_NAME` を未設定に�
   - plan  : サブスクリプション `Reader` + State SA `Storage Blob Data Contributor`
   - apply : サブスクリプション `Contributor` + State SA `Storage Blob Data Contributor`
 
+`Contributor` は `Microsoft.Authorization/*/write` を NotActions で除外しているため、
+**`10-policy` スタックの apply には追加のロールが必要**です。
+
+| スタック | apply に必要な追加ロール | 理由 |
+|---|---|---|
+| `10-policy` | `Resource Policy Contributor` | `Microsoft.Authorization/policyAssignments/write` |
+| `10-policy` | `User Access Administrator` | DeployIfNotExists の修復用マネージド ID へのロール割り当て |
+| すべて（NSP 利用時） | `NSP Access Rule Operator`（カスタム） | runner IP の一時登録 / 削除 |
+
+`User Access Administrator` は強力なため、本番では
+「割り当て可能なロールを限定する条件付きロール割り当て」を併用するか、
+`10-policy` 専用の SP を用意して他スタックと分離してください。
+
 #### subject の形式（イミュータブル subject クレーム）
 
 2026-07-15 以降に作成・リネーム・移管されたリポジトリでは、
