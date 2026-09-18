@@ -109,6 +109,28 @@ plan 用を分けているのは、同一 Environment にすると PR の plan �
 | `NSP_PROFILE_NAME` | Repository | NSP プロファイル名 |
 | `STATE_STORAGE_ACCOUNT` | Repository | 疎通確認に使う State ストレージアカウント名 |
 
+### 一括セットアップ
+
+上記の Environment と変数は [`bootstrap/github-setup.ps1`](bootstrap/github-setup.ps1) で一括作成できます。
+
+```powershell
+winget install --id GitHub.cli -e
+gh auth login          # Scopes: repo, workflow
+
+./bootstrap/github-setup.ps1 `
+  -Repo             <OWNER>/<REPO> `
+  -TenantId         <テナント ID> `
+  -PlanClientId     <plan 用アプリの appId> `
+  -ApplyClientId    <apply 用アプリの appId> `
+  -NspResourceGroup <NSP のリソースグループ> `
+  -NspName          <NSP 名> `
+  -NspProfileName   <NSP プロファイル名> `
+  -StateStorageAccount <State ストレージアカウント名>
+```
+
+prd の承認ゲート（Required reviewers）とブランチ保護は、
+運用主体を明示する必要があるため手動で設定します。
+
 ## ブランチ戦略
 
 GitHub Flow。`main` は常にリリース可能な状態に保ち、変更は短命の feature ブランチと
