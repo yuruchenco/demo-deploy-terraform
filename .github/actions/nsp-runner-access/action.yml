@@ -87,25 +87,42 @@ runs:
           --only-show-errors > /dev/null
         echo "::notice::アクセスルール ${{ inputs.rule_name }} を作成しました。"
 
-    # NSP のルール反映には 60〜90 秒程度かかる（実測）。
-    # 固定 sleep ではなくデータプレーンへの疎通で判定する。
+    # NSP のルール反映はペリメーターのバックエンドノード単位で進むため、
+    # プローブが 1 回通っても全ノードに行き渡ったとは限らない。
+    # 実際、1 回成功した直後の terraform init が
+    #   403 This request is not authorized by network security perimeter
+    # で失敗する事象を確認している。
+    # そのため「最低待機時間」と「連続成功回数」の両方を満たすまで待つ。
     - name: NSP の反映を待機
       if: inputs.mode == 'add' && inputs.storage_account != ''
       shell: bash
+      env:
+        MIN_WAIT_SECONDS: "45"
+        REQUIRED_CONSECUTIVE_OK: "3"
+        PROBE_INTERVAL_SECONDS: "10"
+        MAX_ATTEMPTS: "40"
       run: |
         set -uo pipefail
-        for i in $(seq 1 30); do
+        sleep "${MIN_WAIT_SECONDS}"
+        ok=0
+        for i in $(seq 1 "${MAX_ATTEMPTS}"); do
           if az storage blob list \
                --auth-mode login \
                --account-name "${{ inputs.storage_account }}" \
                --container-name "${{ inputs.container }}" \
                --num-results 1 --only-show-errors > /dev/null 2>&1; then
-            echo "::notice::State ストレージへ到達できました（${i} 回目）。"
-            exit 0
+            ok=$((ok + 1))
+            if [ "${ok}" -ge "${REQUIRED_CONSECUTIVE_OK}" ]; then
+              echo "::notice::State ストレージへ ${ok} 回連続で到達できました（${i} 回目の試行）。"
+              exit 0
+            fi
+          else
+            # 1 回でも失敗したら未反映とみなしてカウントをリセットする。
+            ok=0
           fi
-          sleep 10
+          sleep "${PROBE_INTERVAL_SECONDS}"
         done
-        echo "::error::NSP のアクセスルール反映後も State ストレージへ到達できませんでした。"
+        echo "::error::NSP のアクセスルール反映後も State ストレージへ安定して到達できませんでした。"
         exit 1
 
     # 失敗時も必ず実行されるよう、呼び出し側で if: always() を付けること。

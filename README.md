@@ -51,7 +51,12 @@ terraform plan -var-file=envs/dev/terraform.tfvars
 - NSP の **Learning モードでは到達できない**。`publicNetworkAccess = Disabled` が優先される。
 - NSP を **Enforced モード**で関連付け、Inbound アクセスルールに送信元グローバル IP を
   登録すると、`publicNetworkAccess = Disabled` のままデータプレーンへ到達できる。
-- ルールの反映には 60〜90 秒程度かかる。
+- ルールの反映には 60〜90 秒程度かかる。**しかも反映は原子的ではない**。
+  ペリメーターのバックエンドノード単位で進むため、疎通確認が 1 回成功した直後の
+  リクエストが `403 This request is not authorized by network security perimeter`
+  で失敗することがある（実測で確認）。
+  そのため composite action 側では「最低待機時間 45 秒」と
+  「10 秒間隔で 3 回連続成功」の両方を満たすまで待機している。
 
 構築手順は [`bootstrap/state-backend.sh`](bootstrap/state-backend.sh) に集約しています。
 
@@ -81,8 +86,38 @@ larger runner** へ移行し、リポジトリ変数 `NSP_NAME` を未設定に�
 - plan 用と apply 用で **別の Entra アプリ**を使い、権限を分離する
   - plan  : サブスクリプション `Reader` + State SA `Storage Blob Data Contributor`
   - apply : サブスクリプション `Contributor` + State SA `Storage Blob Data Contributor`
-- フェデレーション資格情報の subject は
-  `repo:<OWNER>/<REPO>:environment:<Environment 名>`
+
+#### subject の形式（イミュータブル subject クレーム）
+
+2026-07-15 以降に作成・リネーム・移管されたリポジトリでは、
+GitHub の**イミュータブル subject クレーム**が自動適用され、
+`sub` にオーナー ID とリポジトリ ID が埋め込まれます。
+
+```
+従来      repo:<OWNER>/<REPO>:environment:<Environment 名>
+新形式    repo:<OWNER>@<OWNER_ID>/<REPO>@<REPO_ID>:environment:<Environment 名>
+```
+
+従来形式で Entra のフェデレーション資格情報を作ると
+`AADSTS700213: No matching federated identity record found` で失敗します。
+`issuer` と `audience` は変わりません。変わるのは `sub` だけです。
+
+自リポジトリの形式は次で確認できます。
+
+```powershell
+gh api repos/<OWNER>/<REPO>/actions/oidc/customization/sub
+# => {"use_default":true,"use_immutable_subject":true,"sub_claim_prefix":"repo:<OWNER>@<ID>/<REPO>@<ID>"}
+```
+
+`sub_claim_prefix` が返る場合は、その値を prefix として
+フェデレーション資格情報の subject を作成してください。
+
+なお、リポジトリ名やオーナー名を変更すると subject の**名前部分**は変化します
+（ID 部分は不変）。リネームを伴う運用では、Entra の
+Flexible federated identity credentials（プレビュー）で
+`claims['sub'] matches '...*' and claims['repository_id'] eq '<REPO_ID>'`
+のようにワイルドカード一致させる方法もあります。
+その場合、スクワッティング対策として `repository_id` の `eq` を必ず併用してください。
 
 ### Environments
 
