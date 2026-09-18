@@ -14,10 +14,10 @@ variable "org" {
 
 variable "environment" {
   type        = string
-  description = "Environment token (dev / stg / prod). 本スタックは dev には存在しない。"
+  description = "Environment token (dev / stg / prd). 本スタックは dev には存在しない。"
   validation {
-    condition     = contains(["dev", "stg", "prod"], var.environment)
-    error_message = "environment must be one of: dev, stg, prod."
+    condition     = contains(["dev", "stg", "prd"], var.environment)
+    error_message = "environment must be one of: dev, stg, prd."
   }
 }
 

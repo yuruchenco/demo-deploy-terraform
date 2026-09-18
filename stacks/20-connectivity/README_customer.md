@@ -211,7 +211,7 @@ terraform apply tfplan
 - `variables.tf` の `default` は**全環境共通の安全側デフォルト**のみ
 - 値の評価順（後勝ち）: `default` < `terraform.tfvars` < `*.auto.tfvars` < `-var-file` < `-var` / `TF_VAR_`
 - **機密値を含む `.tfvars` は Git 管理しない**（`.gitignore` で `*.tfvars` 除外。コミットは `*.example` のみ）
-- 環境ごとに `.tfvars` を分離（`prod.tfvars` / `dev.tfvars`）し、同一コードを使い回す
+- 環境ごとに `.tfvars` を分離（`prd.tfvars` / `dev.tfvars`）し、同一コードを使い回す
 - AVM のバージョンは `.terraform.lock.hcl` で固定（0.x は破壊的変更が入り得るため）
 
 主なパラメータは `terraform.tfvars.example` を参照してください（subscription_id / CIDR / SKU / Gateway 種別 / 各種デプロイフラグ）。

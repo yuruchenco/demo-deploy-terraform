@@ -14,10 +14,10 @@ variable "org" {
 
 variable "environment" {
   type        = string
-  description = "Environment token (dev / stg / prod). 既定値は設けない。envs/<env>/terraform.tfvars で必ず明示する。"
+  description = "Environment token (dev / stg / prd). 既定値は設けない。envs/<env>/terraform.tfvars で必ず明示する。"
   validation {
-    condition     = contains(["dev", "stg", "prod"], var.environment)
-    error_message = "environment must be one of: dev, stg, prod."
+    condition     = contains(["dev", "stg", "prd"], var.environment)
+    error_message = "environment must be one of: dev, stg, prd."
   }
 }
 
@@ -93,7 +93,7 @@ variable "deploy_route_table" {
 
 variable "deploy_ddos_protection_plan" {
   type        = bool
-  description = "Whether to deploy a DDoS Network Protection Plan. 【高額】prod のみ有効化する。"
+  description = "Whether to deploy a DDoS Network Protection Plan. 【高額】prd のみ有効化する。"
   default     = false
 }
 

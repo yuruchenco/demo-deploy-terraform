@@ -19,7 +19,7 @@ terraform {
   #
   # -reconfigure は必須。付け忘れると Terraform が
   # "Do you want to copy existing state to the new backend?" を尋ね、
-  # 誤って yes と答えると dev の state が prod を上書きする事故になる。
+  # 誤って yes と答えると dev の state が prd を上書きする事故になる。
   # -migrate-state は使用禁止。
   #
   # 拡張子を .hcl にしているのは、envs/<env>/*.tfvars を

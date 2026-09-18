@@ -12,7 +12,7 @@ instance        = "001"
 
 hub_virtual_network_id = "<20-connectivity/stg の hub_vnet_id>"
 
-# stg / prod は全 12 ゾーンを定義する（05_環境差分マトリクス #13）。
+# stg / prd は全 12 ゾーンを定義する（05_環境差分マトリクス #13）。
 private_dns_zones = [
   "privatelink.blob.core.windows.net",
   "privatelink.file.core.windows.net",

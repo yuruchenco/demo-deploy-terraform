@@ -14,10 +14,10 @@ variable "org" {
 
 variable "environment" {
   type        = string
-  description = "Environment token (dev / stg / prod). 既定値は設けない。envs/<env>/terraform.tfvars で必ず明示する。"
+  description = "Environment token (dev / stg / prd). 既定値は設けない。envs/<env>/terraform.tfvars で必ず明示する。"
   validation {
-    condition     = contains(["dev", "stg", "prod"], var.environment)
-    error_message = "environment must be one of: dev, stg, prod."
+    condition     = contains(["dev", "stg", "prd"], var.environment)
+    error_message = "environment must be one of: dev, stg, prd."
   }
 }
 
@@ -72,7 +72,7 @@ variable "deploy_key_vault" {
 
 variable "key_vault_purge_protection" {
   type        = bool
-  description = "Enable purge protection on the Key Vault. prod では true 必須。一度有効化すると無効化できない。"
+  description = "Enable purge protection on the Key Vault. prd では true 必須。一度有効化すると無効化できない。"
   default     = false
 }
 

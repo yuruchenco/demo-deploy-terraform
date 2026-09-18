@@ -10,7 +10,7 @@
 *                               @yuichimasuda
 
 # 本番パラメータ
-/stacks/**/envs/prod/           @yuichimasuda
+/stacks/**/envs/prd/           @yuichimasuda
 
 # ワークフロー
 #

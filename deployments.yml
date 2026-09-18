@@ -6,12 +6,12 @@
 # 「どのスタックがどの環境に存在するか」の正本を 1 箇所に保つ。
 #
 # スタック名の数値プレフィックスが適用順序を表す（02_スタック構成）。
-#   00-management-groups    管理グループ階層            （stg / prod のみ）
+#   00-management-groups    管理グループ階層            （stg / prd のみ）
 #   10-policy               Azure Policy 定義・割り当て
 #   20-connectivity         Hub VNet / Firewall / Bastion / Route Table
 #   21-dns                  Private DNS Zone / DNS Private Resolver
-#   22-gateway              ExpressRoute / VPN Gateway （stg / prod のみ）
-#   30-identity             ID 関連                    （stg / prod のみ）
+#   22-gateway              ExpressRoute / VPN Gateway （stg / prd のみ）
+#   30-identity             ID 関連                    （stg / prd のみ）
 #   40-management           Log Analytics / Key Vault
 #   50-subscription-vending サブスクリプション払い出し
 #
@@ -68,7 +68,7 @@ deployments:
     subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
 
 ###############################################################################
-# stg / prod は Environment とフェデレーション資格情報が整い次第、有効化する。
+# stg / prd は Environment とフェデレーション資格情報が整い次第、有効化する。
 # 22-gateway は dev には存在しない（02_スタック構成のとおり）。
 #
 #  - stack: 22-gateway

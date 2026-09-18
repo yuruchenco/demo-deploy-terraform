@@ -7,7 +7,7 @@ ALZ 準拠 Hub-Spoke トポロジの **Hub サブスクリプション**リソ�
 
 | リソース | 実装 | 備考 |
 |----------|------|------|
-| Resource Group | AVM `avm-res-resources-resourcegroup` | `rg-masuda-hub-prod-jpe-001` |
+| Resource Group | AVM `avm-res-resources-resourcegroup` | `rg-masuda-hub-prd-jpe-001` |
 | Hub VNet + Subnets | AVM `avm-res-network-virtualnetwork` | Gateway/Firewall/Bastion/DNS Resolver 用サブネット |
 | Azure Firewall + Policy | AVM `avm-res-network-azurefirewall` / `-firewallpolicy` | SKU 可変（Basic/Standard/Premium） |
 | Azure Bastion | AVM `avm-res-network-bastionhost` | Standard SKU |
@@ -48,17 +48,18 @@ terraform init \
 ```
 
 > **重要（本テナントのポリシー制約）**
-> - ストレージアカウントは **Azure Policy によりパブリックネットワークアクセスが強制的に無効化** されます。State 用ストレージには **Private Endpoint** を構成し、実行環境（**self-hosted runner を Hub VNet 内に配置**）から Private DNS 経由で解決させてください。
-> - **共有キー認証も無効**のため、backend は `use_azuread_auth = true`（Entra ID 認証）を使用します。実行 ID に State ストレージへの `Storage Blob Data Contributor` を付与してください。
+> - ストレージアカウントは **Azure Policy によりパブリックネットワークアクセスが強制的に無効化** されます。本リポジトリでは **Network Security Perimeter (NSP) を Enforced モード**で関連付け、Inbound アクセスルールに送信元グローバル IP を登録することで、`publicNetworkAccess = Disabled` のままデータプレーンへ到達させています（`bootstrap/state-backend.sh`）。Private Endpoint による閉域接続も選択肢です。
+> - NSP は **Learning モードではリソース側の `publicNetworkAccess` 設定が優先される**ため到達できません。必ず Enforced にしてください。
+> - **共有キー認証も無効**のため、backend は `use_azuread_auth = true`（Entra ID 認証）を使用します。実行 ID に State ストレージへの `Storage Blob Data Contributor` を付与してください。plan 用の ID にも必須です（BLOB リースでロックを取得するため）。
 
 ### ローカル検証（State ストレージ未整備時）
-Private Endpoint 未整備の段階では、`backend "azurerm"` ブロックを一時的にコメントアウトするか `-backend=false` で `validate` / `plan` を実行できます（apply はローカル State を使う一時作業ディレクトリで実施）。
+State ストレージ未整備の段階では、`-backend=false` で `validate` を実行できます（`plan` / `apply` はローカル State を使う一時作業ディレクトリで実施）。
 
 ## CI/CD（GitHub Actions）
-- `.github/workflows/ci.yml` … PR で `fmt -check` → `init` → `validate` → `plan`（成果物 `tfplan.bin` を artifact 化）
-- `.github/workflows/cd.yml` … `main` push もしくは手動実行で `apply`（GitHub Environment `production` の承認ゲート付き）
-- **Enterprise ポリシーで GitHub-hosted runner が無効**のため、両ワークフローとも `runs-on: [self-hosted]`。
-- 認証は **OIDC**（`azure/login@v2`）。必要な Secrets：`AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` / `TFSTATE_RG` / `TFSTATE_SA` / `TFSTATE_CONTAINER`。
+- `.github/workflows/ci.yml` … PR で `fmt -check` → `init` → `validate` → `plan`（結果を PR にコメント）
+- `.github/workflows/cd.yml` … `main` push もしくは手動実行で `apply`（`dev` → `stg` → `prd` の順に段階適用。`prd` の Environment に承認ゲートを設定）
+- runner はリポジトリ変数 `RUNNER_LABEL` で切り替えます。**GitHub-hosted runner は送信元 IP が動的**で NSP の IP 許可リストでは運用できないため、リモート State を CI から使う場合は self-hosted runner もしくは Azure Private Networking 対応の larger runner が前提です。
+- 認証は **OIDC**。Environment 単位に `ARM_CLIENT_ID` / `ARM_TENANT_ID` / `ARM_SUBSCRIPTION_ID` を **variables** として設定します（機密情報ではないため secrets 不要）。クライアントシークレットは保持しません。
 
 ## 命名・タグ
 - 命名：CAF 準拠 `<type>-masuda-hub-<env>-<region>-<instance>`（`org=masuda` 確定）
@@ -94,7 +95,7 @@ Private Endpoint 未整備の段階では、`backend "azurerm"` ブロックを�
      default = []   # 非対応リージョン向けの安全側デフォルト
    }
    ```
-3. **CLI 引数（一時的な上書き）** — `-var-file=prod.tfvars` / `-var="env=dev"`。
+3. **CLI 引数（一時的な上書き）** — `-var-file=prd.tfvars` / `-var="env=dev"`。
 4. **CI/CD（GitHub Actions）** — 機密値は `.tfvars` ではなく **Secrets / OIDC**（`ARM_*` 環境変数）で注入する。
 
 ### 値の評価順（後勝ち）
@@ -105,7 +106,7 @@ variables.tf の default  <  terraform.tfvars  <  *.auto.tfvars  <  -var-file  <
 
 ### 運用ルール
 
-- **環境ごとに `.tfvars` を分離**する（例：`prod.tfvars` / `dev.tfvars`）。同一の `*.tf` コードを使い回し、差分は変数値のみとする。
+- **環境ごとに `.tfvars` を分離**する（例：`prd.tfvars` / `dev.tfvars`）。同一の `*.tf` コードを使い回し、差分は変数値のみとする。
 - **機密情報を含む `.tfvars` は Git 管理しない**（`.gitignore` で `*.tfvars` を除外済み。コミットするのは `terraform.tfvars.example` のみ）。
 - **リソース定義（`*.tf`）に値を直書きしない**。必ず `var.xxx` 経由で参照する。
 - **命名は `locals.tf` の CAF 規約で自動生成**する（`<type>-<org>-hub-<env>-<region>-<instance>`）。個別リソースで名前を直書きしない。

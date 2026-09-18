@@ -15,7 +15,7 @@
 ###############################################################################
 set -euo pipefail
 
-ENV_NAME="${1:?usage: state-backend.sh <dev|stg|prod> <subscription-id> <client-ip>}"
+ENV_NAME="${1:?usage: state-backend.sh <dev|stg|prd> <subscription-id> <client-ip>}"
 SUBSCRIPTION_ID="${2:?subscription id required}"
 CLIENT_IP="${3:?client global IP required}"
 
