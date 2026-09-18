@@ -79,6 +79,9 @@ jobs:
 
   apply-stg:
     needs: [discover, apply-dev]
+    # deployments.yml に該当環境の定義が無い場合は空のマトリクスになる。
+    # 空の include を渡すとジョブがエラーになるため、ここでスキップする。
+    if: needs.discover.outputs.stg != '[]'
     name: apply stg/${{ matrix.stack }}
     uses: ./.github/workflows/_terraform-apply.yml
     strategy:
@@ -95,7 +98,10 @@ jobs:
   # prd の Environment 側に required reviewers を設定しておくこと。
   # ここに到達した時点で job が待機状態になり、承認されるまで apply されない。
   apply-prd:
-    needs: [discover, apply-stg]
+    needs: [discover, apply-dev, apply-stg]
+    # stg がスキップされた場合も prd を実行できるよう always() を使う。
+    # ただし前段が失敗した場合は進めない。
+    if: always() && needs.apply-dev.result == 'success' && needs.apply-stg.result != 'failure' && needs.discover.outputs.prd != '[]'
     name: apply prd/${{ matrix.stack }}
     uses: ./.github/workflows/_terraform-apply.yml
     strategy:
