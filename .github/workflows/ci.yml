@@ -99,10 +99,20 @@ jobs:
       # state バックエンドの扱い
       #
       # 本テナントではポリシーによりストレージアカウントの
-      # publicNetworkAccess が強制的に Disabled にされるため、
-      # GitHub-hosted runner からは azurerm backend に到達できない。
+      # publicNetworkAccess が強制的に Disabled にされる。
       #
-      # そのため既定ではローカル state で plan する（差分の確認はできる）。
+      # Network Security Perimeter (NSP) を Enforced モードで関連付け、
+      # Inbound アクセスルールに送信元グローバル IP を登録すれば
+      # publicNetworkAccess = Disabled のままデータプレーンへ到達できる
+      # （運用管理端末からのローカル実行はこの方式で検証済み）。
+      #
+      # ただし GitHub-hosted runner は送信元 IP が動的であり、
+      # NSP の IP 許可リストでは運用できない。
+      # したがって CI からリモート state を使う場合は
+      # self-hosted runner もしくは Azure Private Networking 対応の
+      # larger runner が前提となる。
+      #
+      # 既定ではローカル state で plan する（差分の確認はできる）。
       # private runner を用意してリモート state を使う段階になったら、
       # リポジトリ変数 USE_REMOTE_STATE = "true" を設定する。
       # ワークフローの書き換えは不要。

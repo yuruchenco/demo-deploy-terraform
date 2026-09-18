@@ -3,8 +3,9 @@
 #
 # 方針:
 #   - main ブランチを正本とし、マージを契機に反映する
-#   - dev → stg → prd の順に段階適用する（前段が成功しないと次へ進まない）
-#   - prd の Environment には required reviewers を設定し、手動承認を必須とする
+#   - dev → stg → prod の順に段階適用する（前段が成功しないと次へ進まない）
+#   - 同一環境内は deployments.yml の order 順に 1 スタックずつ適用する
+#   - prod の Environment には required reviewers を設定し、手動承認を必須とする
 #   - 承認画面で plan 結果を確認してから apply する
 #
 # `environment:` は job 単位でしか指定できない。
@@ -42,13 +43,18 @@ jobs:
     outputs:
       dev: ${{ steps.build.outputs.dev }}
       stg: ${{ steps.build.outputs.stg }}
-      prd: ${{ steps.build.outputs.prd }}
+      prod: ${{ steps.build.outputs.prod }}
     steps:
       - uses: actions/checkout@v4
       - id: build
         run: |
-          for e in dev stg prd; do
-            m=$(yq -o=json -I=0 "[.deployments[] | select(.env == \"$e\")]" deployments.yml)
+          # order の昇順に並べる。スタック間の依存（20-connectivity の
+          # 診断設定が 40-management の LAW を参照する等）があるため、
+          # 適用順序は deployments.yml の order を正本とする。
+          for e in dev stg prod; do
+            m=$(yq -o=json -I=0 \
+              "[.deployments[] | select(.env == \"$e\")] | sort_by(.order)" \
+              deployments.yml)
             echo "$e=$m" >> "$GITHUB_OUTPUT"
             echo "$e -> $m"
           done
@@ -59,6 +65,10 @@ jobs:
     uses: ./.github/workflows/_terraform-apply.yml
     strategy:
       fail-fast: true
+      # スタック間に依存があるため、order 順に 1 つずつ適用する。
+      # 並列実行すると 40-management の LAW が未作成のまま
+      # 20-connectivity が診断設定を作ろうとして失敗する。
+      max-parallel: 1
       matrix:
         include: ${{ fromJson(needs.discover.outputs.dev) }}
     with:
@@ -73,6 +83,7 @@ jobs:
     uses: ./.github/workflows/_terraform-apply.yml
     strategy:
       fail-fast: true
+      max-parallel: 1
       matrix:
         include: ${{ fromJson(needs.discover.outputs.stg) }}
     with:
@@ -81,16 +92,17 @@ jobs:
       environment: ${{ matrix.environment }}
       subscription_id: ${{ matrix.subscription_id }}
 
-  # prd の Environment 側に required reviewers を設定しておくこと。
+  # prod の Environment 側に required reviewers を設定しておくこと。
   # ここに到達した時点で job が待機状態になり、承認されるまで apply されない。
-  apply-prd:
+  apply-prod:
     needs: [discover, apply-stg]
-    name: apply prd/${{ matrix.stack }}
+    name: apply prod/${{ matrix.stack }}
     uses: ./.github/workflows/_terraform-apply.yml
     strategy:
       fail-fast: true
+      max-parallel: 1
       matrix:
-        include: ${{ fromJson(needs.discover.outputs.prd) }}
+        include: ${{ fromJson(needs.discover.outputs.prod) }}
     with:
       stack: ${{ matrix.stack }}
       env_name: ${{ matrix.env }}
