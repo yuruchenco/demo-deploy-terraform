@@ -76,3 +76,21 @@ variable "max_days_to_rotate" {
   description = "Value for the 'Keys should have a rotation policy' (d8cf8476) parameter 'maximumDaysToRotate'. Required (no default in the definition)."
   default     = 90
 }
+
+variable "activity_log_alert_administrative_operation" {
+  type        = string
+  description = "operationName for 'An activity log alert should exist for specific Administrative operations' (b954148f). Empty string skips the assignment."
+  default     = "Microsoft.Authorization/roleAssignments/write"
+}
+
+variable "activity_log_alert_policy_operation" {
+  type        = string
+  description = "operationName for 'An activity log alert should exist for specific Policy operations' (c5447c04). Empty string skips the assignment."
+  default     = "Microsoft.Authorization/policyAssignments/write"
+}
+
+variable "activity_log_alert_security_operation" {
+  type        = string
+  description = "operationName for 'An activity log alert should exist for specific Security operations' (3b980d31). Empty string skips the assignment."
+  default     = "Microsoft.Security/policies/write"
+}

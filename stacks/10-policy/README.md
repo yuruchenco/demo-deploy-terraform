@@ -67,11 +67,30 @@ terraform apply -var="enforce=true"
 | `excluded_policies` | `[]` | 段階導入のためにスキップする GUID の一覧 |
 | `not_scopes` | `[]` | 全割当から除外するリソース ID（例: 特定 RG） |
 | `allowed_locations` | `[]` | 「Allowed locations」Deny ポリシーの許可リージョン |
+| `log_analytics_workspace_id` | `""` | 診断ログ系 31 ポリシーの `logAnalytics` へ自動配線 |
+| `max_days_to_rotate` | `90` | 「Keys should have a rotation policy」の `maximumDaysToRotate` |
+| `activity_log_alert_*_operation` | 各既定値 | アクティビティログアラート 3 ポリシーの `operationName` |
 | `policy_parameters` | `{}` | GUID → JSON 文字列でパラメータを上書き（下記参照） |
+
+### 必須パラメータと自動スキップ
+
+管理対象 57 ポリシーのうち **38 ポリシーは定義側に `defaultValue` が無いパラメータ**を持ち、値を渡さずに割り当てると Azure が `MissingPolicyParameter`（400）で拒否します。実機の `terraform apply` でこのエラーを確認済みです。
+
+そのため本スタックでは、必須パラメータを解決できないポリシーを**割当対象から自動的に除外**します。除外された GUID は `skipped_policies` 出力で確認できます。
+
+| 必須パラメータ | 対象 | 供給方法 |
+|------|------|----------|
+| `logAnalytics` | 診断ログ系 31 ポリシー | `log_analytics_workspace_id` |
+| `listOfAllowedLocations` | Allowed locations | `allowed_locations` |
+| `maximumDaysToRotate` | Keys rotation | `max_days_to_rotate` |
+| `operationName` | アクティビティログアラート 3 ポリシー | `activity_log_alert_*_operation` |
+| `networkWatcherName` / `storageId` / `vnetRegion` ほか | Flow Log 系 2 ポリシー | `policy_parameters`（20-connectivity 側の値が必要なため未配線） |
+
+`log_analytics_workspace_id` は 40-management スタックの Log Analytics ワークスペース ID を指します。スタック間で自動連携させず値のコピーとしているのは、`10-policy`（order 10）が `40-management`（order 40）より先に実行されるためです。初回は空のまま適用し、ワークスペース作成後に値を設定して再適用します。
 
 ### パラメータ上書き（任意）
 
-管理対象の 57 ポリシーは**全パラメータにデフォルトがある**ため、パラメータ未指定でも `apply` は成功します。診断ログ系（`... to Log Analytics`）ポリシーの修復先ワークスペースを明示したい場合などにのみ、`policy_parameters` で上書きします。
+上表の専用変数でカバーされないパラメータは `policy_parameters` で上書きします。
 
 ```hcl
 policy_parameters = {
@@ -80,6 +99,17 @@ policy_parameters = {
   })
 }
 ```
+
+## 必要な権限
+
+apply に使う Service Principal は `Contributor` では不足します（`Microsoft.Authorization/*/write` が NotActions で除外されているため）。
+
+| ロール | 用途 |
+|--------|------|
+| `Resource Policy Contributor` | `policyAssignments/write` |
+| `User Access Administrator` | DeployIfNotExists / Modify の修復用マネージド ID へのロール割り当て |
+
+`User Access Administrator` は強力なため、本番では割り当て可能なロールを限定する条件付きロール割り当て、または本スタック専用 SP による分離を推奨します。
 
 ## 段階導入の推奨手順
 

@@ -78,10 +78,11 @@ locals {
     "f81e3117-0093-4b17-8a60-82363134f0eb" = { effect = "Modify", display = "Configure secure transfer of data on a storage account" }
   }
 
-  # Apply exclusions.
+  # Apply exclusions, then drop anything whose required parameters are unresolved
+  # (see local.unsatisfied_policies below).
   assigned_policies = {
     for id, meta in local.policies : id => meta
-    if !contains(var.excluded_policies, id)
+    if !contains(var.excluded_policies, id) && !contains(local.unsatisfied_policies, id)
   }
 
   # Subset that needs a managed identity (DeployIfNotExists / Modify).
@@ -155,14 +156,69 @@ locals {
     "d8cf8476-a2ec-4916-896e-992351803c44", # Keys rotation (Microsoft.KeyVault.Data)
   ]
 
+  # "An activity log alert should exist for specific <X> operations" requires
+  # operationName (no default). One policy per category.
+  activity_log_alert_policy_ids = {
+    administrative = "b954148f-4c11-4c38-8221-be76711e194a"
+    policy         = "c5447c04-a4d7-4ba8-a263-c9ee321a6858"
+    security       = "3b980d31-7904-4bb7-8575-5665739a8052"
+  }
+  activity_log_alert_operations = {
+    administrative = var.activity_log_alert_administrative_operation
+    policy         = var.activity_log_alert_policy_operation
+    security       = var.activity_log_alert_security_operation
+  }
+  activity_log_alert_parameters = {
+    for category, id in local.activity_log_alert_policy_ids :
+    id => jsonencode({ operationName = { value = local.activity_log_alert_operations[category] } })
+    if local.activity_log_alert_operations[category] != ""
+  }
+
   computed_parameters = merge(
     local.allowed_locations_parameters,
     local.log_analytics_parameters,
     local.key_rotation_parameters,
+    local.activity_log_alert_parameters,
   )
 
   # User-supplied parameter overrides win over computed ones.
   effective_parameters = merge(local.computed_parameters, var.policy_parameters)
+
+  # ----------------------------------------------------------------------------
+  # Required-parameter guard
+  #
+  # These built-in definitions declare parameters with NO defaultValue. Azure
+  # rejects the assignment with `MissingPolicyParameter` unless every one of them
+  # is supplied. Rather than failing the whole apply, a policy whose required
+  # parameters cannot be resolved is silently dropped from the assignment set and
+  # surfaced through the `skipped_policies` output.
+  #
+  # To enable a skipped policy, either set the dedicated variable
+  # (log_analytics_workspace_id / allowed_locations / ...) or supply the raw
+  # parameters through var.policy_parameters.
+  # ----------------------------------------------------------------------------
+  required_parameters = merge(
+    { for id in local.log_analytics_policy_ids : id => ["logAnalytics"] },
+    { for category, id in local.activity_log_alert_policy_ids : id => ["operationName"] },
+    {
+      (local.allowed_locations_policy_id) = ["listOfAllowedLocations"]
+      (local.key_rotation_policy_id)      = ["maximumDaysToRotate"]
+
+      # Flow log policies need a Network Watcher, a storage account and the
+      # region names. Those live in the 20-connectivity stack, so they are not
+      # wired here; supply them via var.policy_parameters to enable them.
+      "3e9965dc-cc13-47ca-8259-a4252fd0cf7b" = ["networkWatcherName", "storageId", "vnetRegion", "workspaceRegion", "workspaceResourceId"]
+      "cd6f7aff-2845-4dab-99f2-6d1754a754b0" = ["networkWatcherName", "storageId", "vnetRegion"]
+    },
+  )
+
+  unsatisfied_policies = [
+    for id, required in local.required_parameters : id
+    if !alltrue([
+      for name in required :
+      contains(keys(jsondecode(lookup(local.effective_parameters, id, "{}"))), name)
+    ])
+  ]
 
   # Flatten remediation role assignments: one per (policy, role) pair.
   remediation_roles = merge([

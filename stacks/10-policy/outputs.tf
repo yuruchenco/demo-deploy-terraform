@@ -8,6 +8,21 @@ output "assignment_count" {
   value       = length(azurerm_subscription_policy_assignment.this)
 }
 
+output "skipped_policies" {
+  description = <<-EOT
+    Built-in policy GUIDs that were NOT assigned because at least one required
+    parameter (no defaultValue in the definition) could not be resolved.
+    Supply the missing value via the dedicated variable or var.policy_parameters
+    to enable them.
+  EOT
+  value       = sort(local.unsatisfied_policies)
+}
+
+output "excluded_policies" {
+  description = "Built-in policy GUIDs skipped explicitly via var.excluded_policies."
+  value       = sort(var.excluded_policies)
+}
+
 output "managed_identity_principal_ids" {
   description = "Map of policy definition GUID => system-assigned identity principalId (DeployIfNotExists / Modify only)."
   value = {
