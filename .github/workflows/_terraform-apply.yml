@@ -56,6 +56,25 @@ jobs:
           terraform_version: "1.14.4"
           terraform_wrapper: false
 
+      # State 用ストレージは NSP (Enforced) で保護されており、
+      # publicNetworkAccess = Disabled のままでは到達できない。
+      # GitHub-hosted runner は送信元 IP が動的なため、
+      # 実行のたびに自身の IP を Inbound アクセスルールへ一時登録する。
+      # 詳細は .github/actions/nsp-runner-access/action.yml を参照。
+      - name: NSP に runner IP を一時登録
+        if: ${{ vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: add
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ inputs.subscription_id }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-cd-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+          storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
+
       # -reconfigure は必須。付け忘れると別環境の state を
       # コピーしてしまう事故につながる。
       - name: terraform init
@@ -71,3 +90,18 @@ jobs:
 
       - name: terraform apply
         run: terraform apply -input=false -auto-approve tfplan
+
+      # 失敗時・キャンセル時も必ず一時ルールを削除する。
+      - name: NSP から runner IP を削除
+        if: ${{ always() && vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: remove
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ inputs.subscription_id }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-cd-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+

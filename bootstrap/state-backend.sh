@@ -120,6 +120,39 @@ az network perimeter association create \
 az lock create --name "lock-tfstate" --lock-type CanNotDelete \
   --resource-group "${RG_STATE}" -o none
 
+###############################################################################
+# 7. CI/CD 用の最小権限ロール（NSP アクセスルールの一時登録/削除）
+#
+# GitHub-hosted runner は送信元 IP が動的であり、NSP の IP 許可リストへ
+# 固定登録できない。そのため実行のたびに自身の IP を登録し、終了時に削除する
+# （.github/actions/nsp-runner-access）。
+# その操作に必要な権限だけを NSP のリソースグループスコープで与える。
+#
+# self-hosted runner / larger runner へ移行した場合、このロールは不要になる。
+###############################################################################
+ROLE_NAME="NSP Access Rule Operator"
+
+if ! az role definition list --name "${ROLE_NAME}" --query "[0].roleName" -o tsv | grep -q .; then
+  cat > /tmp/nsp-role.json <<EOF
+{
+  "Name": "${ROLE_NAME}",
+  "Description": "GitHub Actions runner が自身の送信元 IP を NSP の Inbound アクセスルールへ一時登録/削除するための最小権限ロール。",
+  "Actions": [
+    "Microsoft.Network/networkSecurityPerimeters/read",
+    "Microsoft.Network/networkSecurityPerimeters/profiles/read",
+    "Microsoft.Network/networkSecurityPerimeters/profiles/accessRules/read",
+    "Microsoft.Network/networkSecurityPerimeters/profiles/accessRules/write",
+    "Microsoft.Network/networkSecurityPerimeters/profiles/accessRules/delete",
+    "Microsoft.Resources/subscriptions/resourceGroups/read"
+  ],
+  "NotActions": [],
+  "AssignableScopes": ["/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RG_NSP}"]
+}
+EOF
+  az role definition create --role-definition @/tmp/nsp-role.json -o none
+  rm -f /tmp/nsp-role.json
+fi
+
 cat <<EOF
 
 ブートストラップ完了
@@ -132,8 +165,18 @@ cat <<EOF
   1. 上記を stacks/*/envs/${ENV_NAME}/backend.hcl に反映する
   2. 実行主体（人 / SP）に "Storage Blob Data Contributor" を付与する
      plan 用 SP にも必須。plan は BLOB リースでロックを取得するため。
-  3. NSP のアクセスルールに CI ランナーの送信元 IP を追加する
-     GitHub-hosted runner は送信元 IP が動的であるため IP 許可では運用できない。
-     self-hosted runner もしくは Azure Private Networking 対応の
-     larger runner を使うこと。
+  3. CI/CD 用 SP に "${ROLE_NAME}" を ${RG_NSP} スコープで付与する
+
+       az role assignment create \\
+         --assignee-object-id <SP の objectId> \\
+         --assignee-principal-type ServicePrincipal \\
+         --role "${ROLE_NAME}" \\
+         --scope "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RG_NSP}"
+
+  4. リポジトリ変数を設定する
+       NSP_NAME             = ${NSP_NAME}
+       NSP_RESOURCE_GROUP   = ${RG_NSP}
+       NSP_PROFILE_NAME     = ${NSP_PROFILE}
+       STATE_STORAGE_ACCOUNT= ${SA_NAME}
+       USE_REMOTE_STATE     = true
 EOF

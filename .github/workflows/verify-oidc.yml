@@ -1,47 +1,47 @@
 ###############################################################################
 # OIDC / GitHub-hosted runner 検証ワークフロー
 #
-# 検証目皁E
-#   1. OIDC (Workload Identity Federation) により、E
-#      GitHub 側にシークレチE��を一刁E��存せずに Azure へ認証できること
-#   2. GitHub-hosted runner (ubuntu-latest) から、E
-#      検証(stg) と 本番(prd) の両環墁E��対して実行できること
+# 検証目的:
+#   1. OIDC (Workload Identity Federation) により、
+#      GitHub 側にシークレットを一切保存せずに Azure へ認証できること
+#   2. GitHub-hosted runner (ubuntu-latest) から、
+#      検証(stg) と 本番(prd) の両環境に対して実行できること
 #
-# 重要な設計�EインチE
-#   - 認証惁E��は Environment *variables* のみ�E�Eecrets は未使用�E�、E
-#     client ID / tenant ID / subscription ID はぁE��れも機寁E��はなぁE��E
-#     パスワードや証明書に相当するものは存在しなぁE��E
-#   - `environment:` は job 単位でしか持E��できなぁE��め、E
-#     1 環墁E= 1 job とする。これにより環墁E��との承認ゲートが機�Eする、E
+# 重要な設計ポイント:
+#   - 認証情報は Environment *variables* のみ（secrets は未使用）。
+#     client ID / tenant ID / subscription ID はいずれも機密ではない。
+#     パスワードや証明書に相当するものは存在しない。
+#   - `environment:` は job 単位でしか指定できないため、
+#     1 環境 = 1 job とする。これにより環境ごとの承認ゲートが機能する。
 #   - OIDC の subject は
 #       repo:<OWNER>/<REPO>:environment:<ENVIRONMENT NAME>
-#     となる、Entra 側のフェチE��ーション賁E��惁E��をこの subject で
+#     となる。Entra 側のフェデレーション資格情報をこの subject で
 #     登録することで、「その Environment を経由した実行だけが
-#     そ�Eサブスクリプションに触れる」ことめEEntra 側で強制できる、E
+#     そのサブスクリプションに触れる」ことを Entra 側で強制できる。
 #
-# 既知の制紁E
-#   本チE��ントではポリシーによりストレージアカウント�E
-#   publicNetworkAccess が強制皁E�� Disabled にされるため、E
-#   azurerm backend (リモーチEstate) へは GitHub-hosted runner から
-#   到達できなぁE��そのため本ワークフローでは backend を使わず、E
-#   ジョブ�Eで完結するローカル state で検証する、E
-#   リモーチEstate を使ぁE��番構�Eでは self-hosted runner もしく�E
-#   Azure Private Networking 対応�E larger runner が忁E��になる、E
+# 既知の制約:
+#   本テナントではポリシーによりストレージアカウントの
+#   publicNetworkAccess が強制的に Disabled にされるため、
+#   azurerm backend (リモート state) へは GitHub-hosted runner から
+#   到達できない。そのため本ワークフローでは backend を使わず、
+#   ジョブ内で完結するローカル state で検証する。
+#   リモート state を使う本番構成では self-hosted runner もしくは
+#   Azure Private Networking 対応の larger runner が必要になる。
 ###############################################################################
 name: verify-oidc
 
-# 検証用のため手動実行�Eみとする、E
-# pull_request で起動すると ci.yml と二重に plan が走り、E
-# どちら�E結果を見ればよいか�Eからなくなる、E
+# 検証用のため手動実行のみとする。
+# pull_request で起動すると ci.yml と二重に plan が走り、
+# どちらの結果を見ればよいか分からなくなる。
 on:
   workflow_dispatch:
     inputs:
       run_apply:
-        description: "apply と destroy まで実行する（既定�E plan まで�E�E
+        description: "apply と destroy まで実行する（既定は plan まで）"
         type: boolean
         default: false
 
-# OIDC ト�Eクンの発行に忁E��。これが無ぁE�� id-token が取得できなぁE��E
+# OIDC トークンの発行に必須。これが無いと id-token が取得できない。
 permissions:
   contents: read
   id-token: write
@@ -66,8 +66,8 @@ jobs:
         working-directory: stacks/${{ matrix.stack }}
 
     env:
-      # azurerm provider めEOIDC で動かすため�E設定、E
-      # クライアントシークレチE��も証明書も指定してぁE��ぁE��に注目、E
+      # azurerm provider を OIDC で動かすための設定。
+      # クライアントシークレットも証明書も指定していない点に注目。
       ARM_USE_OIDC: "true"
       ARM_CLIENT_ID: ${{ vars.ARM_CLIENT_ID }}
       ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
@@ -76,15 +76,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: シークレチE��が設定されてぁE��ぁE��とを確誁E
+      - name: シークレットが設定されていないことを確認
         run: |
-          echo "こ�E job が参照してぁE��認証惁E��は Environment variables のみです、E
+          echo "この job が参照している認証情報は Environment variables のみです。"
           echo "ARM_CLIENT_ID       = ${ARM_CLIENT_ID}"
           echo "ARM_TENANT_ID       = ${ARM_TENANT_ID}"
           echo "ARM_SUBSCRIPTION_ID = ${ARM_SUBSCRIPTION_ID}"
-          echo "ARM_CLIENT_SECRET   = '${ARM_CLIENT_SECRET:-(未設宁E}'"
+          echo "ARM_CLIENT_SECRET   = '${ARM_CLIENT_SECRET:-(未設定)}'"
           if [ -n "${ARM_CLIENT_SECRET:-}" ]; then
-            echo "::error::ARM_CLIENT_SECRET が設定されてぁE��す。OIDC 検証の前提が崩れます、E
+            echo "::error::ARM_CLIENT_SECRET が設定されています。OIDC 検証の前提が崩れます。"
             exit 1
           fi
 
@@ -95,11 +95,11 @@ jobs:
           tenant-id: ${{ vars.ARM_TENANT_ID }}
           subscription-id: ${{ vars.ARM_SUBSCRIPTION_ID }}
 
-      - name: ログインできたことを確誁E
+      - name: ログインできたことを確認
         run: |
           az account show -o json
           echo "---"
-          echo "こ�E runner が使用してぁE��のは GitHub が発行した短命の OIDC ト�Eクンです、E
+          echo "この runner が使用しているのは GitHub が発行した短命の OIDC トークンです。"
           echo "runner image: ${ImageOS:-unknown} / hosted"
 
       - uses: hashicorp/setup-terraform@v3
@@ -110,19 +110,19 @@ jobs:
       - name: terraform fmt
         run: terraform fmt -check -recursive
 
-      # backend を使わずローカル state で初期化する、E
+      # backend を使わずローカル state で初期化する。
       #
-      # versions.tf の backend "azurerm" は、本チE��ント�Eポリシーにより
-      # GitHub-hosted runner からは到達できなぁE��E
-      # Terraform は *_override.tf を後勝ちでマ�Eジするため、E
-      # ここでローカルバックエンドに差し替える、E
+      # versions.tf の backend "azurerm" は、本テナントのポリシーにより
+      # GitHub-hosted runner からは到達できない。
+      # Terraform は *_override.tf を後勝ちでマージするため、
+      # ここでローカルバックエンドに差し替える。
       #
-      # 本番構�E�E�Eelf-hosted / private larger runner�E�では
-      # こ�E override を作らず、代わりに
+      # 本番構成（self-hosted / private larger runner）では
+      # この override を作らず、代わりに
       #   terraform init -reconfigure -input=false \
       #     -backend-config=envs/<env>/backend.hcl
-      # を実行する、E
-      - name: ローカルバックエンドへ差し替ぁE
+      # を実行する。
+      - name: ローカルバックエンドへ差し替え
         run: |
           cat > local_override.tf <<'EOF'
           terraform {
@@ -147,12 +147,12 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_apply }}
         run: terraform apply -input=false -auto-approve tfplan
 
-      # apply を実際に行った場合�Eみ後片付けする、E
+      # apply を実際に行った場合のみ後片付けする。
       #
-      # always() だけで判定すると、ログインめEplan が失敗して
-      # apply がスキチE�Eされた場合にめEdestroy が走り、E
-      # 空また�E不完�Eな state に対して destroy を実行してしまぁE��E
-      # apply スチE��プが skipped でなぁE��とを条件に加えてそれを防ぐ、E
+      # always() だけで判定すると、ログインや plan が失敗して
+      # apply がスキップされた場合にも destroy が走り、
+      # 空または不完全な state に対して destroy を実行してしまう。
+      # apply ステップが skipped でないことを条件に加えてそれを防ぐ。
       - name: terraform destroy (後片付け)
         if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.run_apply && steps.apply.conclusion != 'skipped' }}
         run: |

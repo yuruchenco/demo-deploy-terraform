@@ -11,7 +11,7 @@ assignment_location = "japaneast"
 enforce = false
 
 # 中央 Log Analytics ワークスペースの resource ID。
-# platform スタックで deploy_log_analytics = true にした後、
+# 40-management スタックで deploy_log_analytics = true にした後、
 # その output をここへ設定する。空のままだと
 # DeployIfNotExists 系ポリシーは除外が必要になる。
 log_analytics_workspace_id = ""

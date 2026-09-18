@@ -107,15 +107,30 @@ jobs:
       # （運用管理端末からのローカル実行はこの方式で検証済み）。
       #
       # ただし GitHub-hosted runner は送信元 IP が動的であり、
-      # NSP の IP 許可リストでは運用できない。
-      # したがって CI からリモート state を使う場合は
-      # self-hosted runner もしくは Azure Private Networking 対応の
-      # larger runner が前提となる。
+      # NSP の IP 許可リストに固定で登録しておくことはできない。
+      # そのため実行のたびに自身の IP を一時登録し、終了時に削除する
+      # （composite action: .github/actions/nsp-runner-access）。
+      # self-hosted runner / larger runner へ移行した時点で
+      # リポジトリ変数 NSP_NAME を未設定にすればこの処理は無効化される。
       #
       # 既定ではローカル state で plan する（差分の確認はできる）。
-      # private runner を用意してリモート state を使う段階になったら、
+      # リモート state を使う段階になったら、
       # リポジトリ変数 USE_REMOTE_STATE = "true" を設定する。
       # ワークフローの書き換えは不要。
+      - name: NSP に runner IP を一時登録
+        if: ${{ vars.USE_REMOTE_STATE == 'true' && vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: add
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ matrix.subscription_id }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
+
       - name: terraform init (リモート state)
         if: ${{ vars.USE_REMOTE_STATE == 'true' }}
         run: |
@@ -126,7 +141,6 @@ jobs:
         if: ${{ vars.USE_REMOTE_STATE != 'true' }}
         run: |
           echo "::notice::USE_REMOTE_STATE が未設定のため、ローカル state で plan します。"
-          echo "::notice::リモート state を使うには private runner の用意が必要です。"
           cat > local_override.tf <<'EOF'
           terraform {
             backend "local" {}
@@ -140,20 +154,24 @@ jobs:
       - name: terraform plan
         id: plan
         run: |
+          set -o pipefail
           terraform plan -input=false -no-color \
             -var-file=envs/${{ matrix.env }}/terraform.tfvars \
             -out=tfplan 2>&1 | tee plan.txt
-          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
 
       # plan の中身は環境情報を含むため、成果物としては保持せず
       # PR コメントの要約のみに留める運用も検討すること。
       - name: plan 要約を PR にコメント
-        if: github.event_name == 'pull_request'
+        if: ${{ always() && github.event_name == 'pull_request' }}
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const path = 'stacks/${{ matrix.stack }}/plan.txt';
+            if (!fs.existsSync(path)) {
+              core.notice(`${path} が存在しないため、コメントをスキップします。`);
+              return;
+            }
             let body = fs.readFileSync(path, 'utf8');
             const limit = 60000;
             if (body.length > limit) {
@@ -165,3 +183,18 @@ jobs:
               repo: context.repo.repo,
               body: `### plan: \`${{ matrix.env }}/${{ matrix.stack }}\`\n\n<details><summary>結果を表示</summary>\n\n\`\`\`hcl\n${body}\n\`\`\`\n\n</details>`
             });
+
+      # 失敗時・キャンセル時も必ず一時ルールを削除する。
+      - name: NSP から runner IP を削除
+        if: ${{ always() && vars.USE_REMOTE_STATE == 'true' && vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: remove
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ matrix.subscription_id }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+
