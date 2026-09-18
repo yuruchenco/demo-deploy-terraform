@@ -80,6 +80,19 @@ variable "deploy_bastion" {
   default     = false
 }
 
+variable "deploy_subnet_nsgs" {
+  type        = bool
+  description = <<-EOT
+    Whether to create and attach NSGs to AzureBastionSubnet and the DNS Resolver subnets.
+
+    プラットフォーム側の Azure Policy が DeployIfNotExists で NSG を自動付与する
+    環境では true のままにすること。false にすると Policy が NSG を付与し、
+    以後 plan のたびに「NSG を外す」差分が出続ける。
+    AzureFirewallSubnet（NSG 付与不可）と GatewaySubnet は対象外。
+  EOT
+  default     = true
+}
+
 variable "deploy_route_table" {
   type        = bool
   description = "Whether to deploy the spoke egress route table. next hop に Firewall の private IP を使うため deploy_firewall = true が前提。"

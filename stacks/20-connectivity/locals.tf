@@ -45,10 +45,16 @@ locals {
     AzureBastionSubnet = {
       name           = "AzureBastionSubnet"
       address_prefix = var.subnet_address_prefixes.AzureBastionSubnet
+      network_security_group = var.deploy_subnet_nsgs ? {
+        id = one(module.nsg_bastion[*].resource_id)
+      } : null
     }
     "snet-dnsresolver-inbound" = {
       name           = "snet-dnsresolver-inbound"
       address_prefix = var.subnet_address_prefixes.dnsresolver_inbound
+      network_security_group = var.deploy_subnet_nsgs ? {
+        id = one(module.nsg_dnsresolver_inbound[*].resource_id)
+      } : null
       delegations = [{
         name = "Microsoft.Network.dnsResolvers"
         service_delegation = {
@@ -59,6 +65,9 @@ locals {
     "snet-dnsresolver-outbound" = {
       name           = "snet-dnsresolver-outbound"
       address_prefix = var.subnet_address_prefixes.dnsresolver_outbound
+      network_security_group = var.deploy_subnet_nsgs ? {
+        id = one(module.nsg_dnsresolver_outbound[*].resource_id)
+      } : null
       delegations = [{
         name = "Microsoft.Network.dnsResolvers"
         service_delegation = {
