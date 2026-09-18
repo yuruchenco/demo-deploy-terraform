@@ -29,7 +29,13 @@
 #        <env>-<stack>-plan   … 承認ゲートなし。SP は Reader 相当。
 #        <env>-<stack>        … 本番は承認ゲートあり。SP は Contributor。
 #   3. Entra 側に上記 2 つの subject でフェデレーション資格情報を登録する
-#        repo:<OWNER>/<REPO>:environment:<Environment 名>
+#        repo:<OWNER>@<OWNER_ID>/<REPO>@<REPO_ID>:environment:<Environment 名>
+#
+#      2026-07-15 以降に作成・リネーム・移管されたリポジトリは
+#      immutable subject 形式（上記）が自動適用される。
+#      現在の prefix は次で確認できる:
+#        gh api repos/<OWNER>/<REPO>/actions/oidc/customization/sub
+#      https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims
 #   4. 各 Environment に variables を設定する
 #        ARM_CLIENT_ID / ARM_TENANT_ID / ARM_SUBSCRIPTION_ID
 #      いずれも secrets ではなく variables でよい（機密情報ではないため）
