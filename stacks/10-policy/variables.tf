@@ -79,18 +79,26 @@ variable "max_days_to_rotate" {
 
 variable "activity_log_alert_administrative_operation" {
   type        = string
-  description = "operationName for 'An activity log alert should exist for specific Administrative operations' (b954148f). Empty string skips the assignment."
-  default     = "Microsoft.Authorization/roleAssignments/write"
+  description = <<-EOT
+    operationName for 'An activity log alert should exist for specific Administrative
+    operations' (b954148f). Empty string skips the assignment.
+    Allowed values (enforced by the definition):
+      Microsoft.Sql/servers/firewallRules/{write,delete}
+      Microsoft.Network/networkSecurityGroups/{write,delete}
+      Microsoft.Network/networkSecurityGroups/securityRules/{write,delete}
+      Microsoft.ClassicNetwork/... equivalents
+  EOT
+  default     = "Microsoft.Network/networkSecurityGroups/write"
 }
 
 variable "activity_log_alert_policy_operation" {
   type        = string
-  description = "operationName for 'An activity log alert should exist for specific Policy operations' (c5447c04). Empty string skips the assignment."
+  description = "operationName for 'An activity log alert should exist for specific Policy operations' (c5447c04). Allowed: Microsoft.Authorization/policyAssignments/{write,delete}. Empty string skips the assignment."
   default     = "Microsoft.Authorization/policyAssignments/write"
 }
 
 variable "activity_log_alert_security_operation" {
   type        = string
-  description = "operationName for 'An activity log alert should exist for specific Security operations' (3b980d31). Empty string skips the assignment."
+  description = "operationName for 'An activity log alert should exist for specific Security operations' (3b980d31). Allowed: Microsoft.Security/policies/write, Microsoft.Security/securitySolutions/{write,delete}. Empty string skips the assignment."
   default     = "Microsoft.Security/policies/write"
 }
