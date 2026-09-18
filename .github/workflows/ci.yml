@@ -1,72 +1,200 @@
-name: CI - Terraform Validate & Plan
+###############################################################################
+# CI: Pull Request 時の検証
+#
+# 対象: deployments.yml に定義されたすべての スタック × 環境
+#
+# 実行内容: fmt / validate / plan
+# plan 結果は PR 上でレビューし、影響範囲と差分を確認したうえでマージする。
+#
+# Runner について:
+#   runs-on はリポジトリ変数 RUNNER_LABEL で切り替える。
+#   RUNNER_LABEL は必ず *リポジトリレベル* の変数として定義すること。
+#   Environment レベルに置くと、reusable workflow から参照した際に
+#   runs-on の評価タイミングで解決されず、
+#   黙って ubuntu-latest にフォールバックする。
+#     初期フェーズ : 未設定（= ubuntu-latest / GitHub-hosted）
+#     本番運用     : larger runner のラベル（Azure Private Networking 経由）
+#   移行はこの変数を変えるだけでよく、ワークフローの書き換えは不要。
+#
+# state について:
+#   リモート state (azurerm backend) に到達するには runner の private 化が前提。
+#   既定ではローカル state で plan する。詳細は init ステップのコメントを参照。
+###############################################################################
+name: ci
 
 on:
   pull_request:
-    branches: [main]
     paths:
-      - "terraform/**"
+      - "stacks/**"
+      - "deployments.yml"
       - ".github/workflows/ci.yml"
-  workflow_dispatch:
 
 permissions:
-  id-token: write   # required for Azure OIDC login
   contents: read
+  id-token: write
   pull-requests: write
 
-env:
-  TF_WORKING_DIR: terraform/hub
-  ARM_USE_OIDC: "true"
-  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  validate-plan:
-    name: Validate & Plan
-    # Enterprise policy disables GitHub-hosted runners -> use self-hosted.
-    runs-on: [self-hosted]
+  # deployments.yml を正本としてマトリクスを生成する。
+  # ワークフロー側に対象を二重定義しないための仕組み。
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        run: |
+          matrix=$(yq -o=json -I=0 '.deployments' deployments.yml)
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "${matrix}"
+
+  plan:
+    needs: discover
+    name: plan ${{ matrix.env }}/${{ matrix.stack }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+
+    # Environment を指定することで、OIDC の subject が
+    #   repo:<OWNER>/<REPO>:environment:<environment>
+    # となり、Entra 側で「どの Environment からの実行か」を強制できる。
+    #
+    # plan 用には apply 用とは別の Environment (<env>-<stack>-plan) を使う。
+    # 同じ Environment を使うと、本番の承認ゲートが PR の plan 時点で
+    # 発火してしまい、レビュー前に承認を求められることになる。
+    # 本番運用では、この plan 用 Environment に紐づく SP は
+    # Reader + state ストレージへの Storage Blob Data Contributor に留め、
+    # 書き込み権限を持たせないこと。
+    environment: ${{ matrix.environment }}-plan
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.discover.outputs.matrix) }}
+
     defaults:
       run:
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: stacks/${{ matrix.stack }}
+
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.ARM_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ matrix.subscription_id }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ">=1.10.0"
+          terraform_version: "1.14.4"
+          terraform_wrapper: false
 
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Terraform Format Check
+      - name: terraform fmt
         run: terraform fmt -check -recursive
 
-      - name: Terraform Init
-        run: >-
-          terraform init -input=false
-          -backend-config="resource_group_name=${{ secrets.TFSTATE_RG }}"
-          -backend-config="storage_account_name=${{ secrets.TFSTATE_SA }}"
-          -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}"
-          -backend-config="key=hub/connectivity.tfstate"
+      # state バックエンドの扱い
+      #
+      # 本テナントではポリシーによりストレージアカウントの
+      # publicNetworkAccess が強制的に Disabled にされる。
+      #
+      # Network Security Perimeter (NSP) を Enforced モードで関連付け、
+      # Inbound アクセスルールに送信元グローバル IP を登録すれば
+      # publicNetworkAccess = Disabled のままデータプレーンへ到達できる
+      # （運用管理端末からのローカル実行はこの方式で検証済み）。
+      #
+      # ただし GitHub-hosted runner は送信元 IP が動的であり、
+      # NSP の IP 許可リストに固定で登録しておくことはできない。
+      # そのため実行のたびに自身の IP を一時登録し、終了時に削除する
+      # （composite action: .github/actions/nsp-runner-access）。
+      # self-hosted runner / larger runner へ移行した時点で
+      # リポジトリ変数 NSP_NAME を未設定にすればこの処理は無効化される。
+      #
+      # 既定ではローカル state で plan する（差分の確認はできる）。
+      # リモート state を使う段階になったら、
+      # リポジトリ変数 USE_REMOTE_STATE = "true" を設定する。
+      # ワークフローの書き換えは不要。
+      - name: NSP に runner IP を一時登録
+        if: ${{ vars.USE_REMOTE_STATE == 'true' && vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: add
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ matrix.subscription_id }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
 
-      - name: Terraform Validate
+      - name: terraform init (リモート state)
+        if: ${{ vars.USE_REMOTE_STATE == 'true' }}
+        run: |
+          terraform init -reconfigure -input=false \
+            -backend-config=envs/${{ matrix.env }}/backend.hcl
+
+      - name: terraform init (ローカル state / 既定)
+        if: ${{ vars.USE_REMOTE_STATE != 'true' }}
+        run: |
+          echo "::notice::USE_REMOTE_STATE が未設定のため、ローカル state で plan します。"
+          cat > local_override.tf <<'EOF'
+          terraform {
+            backend "local" {}
+          }
+          EOF
+          terraform init -reconfigure -input=false
+
+      - name: terraform validate
         run: terraform validate
 
-      - name: Terraform Plan
-        run: >-
-          terraform plan -input=false -no-color
-          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}"
-          -out=tfplan.bin
+      - name: terraform plan
+        id: plan
+        run: |
+          set -o pipefail
+          terraform plan -input=false -no-color \
+            -var-file=envs/${{ matrix.env }}/terraform.tfvars \
+            -out=tfplan 2>&1 | tee plan.txt
 
-      - name: Upload Plan Artifact
-        uses: actions/upload-artifact@v4
+      # plan の中身は環境情報を含むため、成果物としては保持せず
+      # PR コメントの要約のみに留める運用も検討すること。
+      - name: plan 要約を PR にコメント
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
         with:
-          name: tfplan
-          path: ${{ env.TF_WORKING_DIR }}/tfplan.bin
-          retention-days: 5
+          script: |
+            const fs = require('fs');
+            const path = 'stacks/${{ matrix.stack }}/plan.txt';
+            if (!fs.existsSync(path)) {
+              core.notice(`${path} が存在しないため、コメントをスキップします。`);
+              return;
+            }
+            let body = fs.readFileSync(path, 'utf8');
+            const limit = 60000;
+            if (body.length > limit) {
+              body = body.slice(-limit);
+            }
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### plan: \`${{ matrix.env }}/${{ matrix.stack }}\`\n\n<details><summary>結果を表示</summary>\n\n\`\`\`hcl\n${body}\n\`\`\`\n\n</details>`
+            });
+
+      # 失敗時・キャンセル時も必ず一時ルールを削除する。
+      - name: NSP から runner IP を削除
+        if: ${{ always() && vars.USE_REMOTE_STATE == 'true' && vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: remove
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ matrix.subscription_id }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+

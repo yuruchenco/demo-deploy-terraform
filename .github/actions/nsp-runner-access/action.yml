@@ -1,0 +1,140 @@
+###############################################################################
+# composite action: NSP への runner IP の一時登録 / 削除
+#
+# 背景:
+#   State 用ストレージアカウントは、テナントのポリシーにより
+#   publicNetworkAccess = Disabled が強制される。
+#   Network Security Perimeter (NSP) を Enforced モードで関連付け、
+#   Inbound アクセスルールに送信元グローバル IP を登録することで、
+#   publicNetworkAccess = Disabled のままデータプレーンへ到達できる。
+#
+#   GitHub-hosted runner は送信元 IP が動的なため、
+#   実行のたびに自身の IP を登録し、終了時に必ず削除する
+#   （ストレージファイアウォールで一般的な「一時許可」パターンと同じ）。
+#
+# 前提:
+#   呼び出し元の SP に対し、NSP プロファイルへの書き込み権限が必要。
+#     Microsoft.Network/networkSecurityPerimeters/profiles/accessRules/*
+#   最小権限のカスタムロールを NSP のリソースグループスコープで付与すること。
+#
+# 恒久運用:
+#   self-hosted runner もしくは Azure Private Networking 対応の
+#   larger runner に移行した時点で、この仕組みは不要になる。
+#   その場合はリポジトリ変数 NSP_NAME を未設定にすればよい。
+###############################################################################
+name: nsp-runner-access
+description: NSP の Inbound アクセスルールに runner のグローバル IP を一時登録 / 削除する
+
+inputs:
+  mode:
+    description: add または remove
+    required: true
+  client_id:
+    required: true
+  tenant_id:
+    required: true
+  subscription_id:
+    required: true
+  resource_group:
+    description: NSP のリソースグループ
+    required: true
+  perimeter_name:
+    required: true
+  profile_name:
+    required: true
+  rule_name:
+    description: 実行ごとに一意なルール名
+    required: true
+  storage_account:
+    description: 疎通確認に使う State ストレージアカウント名
+    required: false
+    default: ""
+  container:
+    required: false
+    default: tfstate
+
+runs:
+  using: composite
+  steps:
+    - name: Azure ログイン (OIDC)
+      uses: azure/login@v2
+      with:
+        client-id: ${{ inputs.client_id }}
+        tenant-id: ${{ inputs.tenant_id }}
+        subscription-id: ${{ inputs.subscription_id }}
+
+    # nsp 拡張は preview のため明示的にインストールする。
+    - name: az nsp 拡張を導入
+      shell: bash
+      run: az extension add --name nsp --allow-preview true --yes --only-show-errors
+
+    - name: NSP に runner IP を登録
+      if: inputs.mode == 'add'
+      shell: bash
+      run: |
+        set -euo pipefail
+        ip=$(curl -fsS --retry 3 https://api.ipify.org)
+        echo "::notice::runner のグローバル IP: ${ip}"
+        # IP そのものはログに残るが、GitHub-hosted runner の一時 IP であり
+        # 実行終了時に削除されるため秘匿対象としては扱わない。
+        az network perimeter profile access-rule create \
+          --resource-group "${{ inputs.resource_group }}" \
+          --perimeter-name "${{ inputs.perimeter_name }}" \
+          --profile-name "${{ inputs.profile_name }}" \
+          --name "${{ inputs.rule_name }}" \
+          --direction Inbound \
+          --address-prefixes "['${ip}/32']" \
+          --only-show-errors > /dev/null
+        echo "::notice::アクセスルール ${{ inputs.rule_name }} を作成しました。"
+
+    # NSP のルール反映はペリメーターのバックエンドノード単位で進むため、
+    # プローブが 1 回通っても全ノードに行き渡ったとは限らない。
+    # 実際、1 回成功した直後の terraform init が
+    #   403 This request is not authorized by network security perimeter
+    # で失敗する事象を確認している。
+    # そのため「最低待機時間」と「連続成功回数」の両方を満たすまで待つ。
+    - name: NSP の反映を待機
+      if: inputs.mode == 'add' && inputs.storage_account != ''
+      shell: bash
+      env:
+        MIN_WAIT_SECONDS: "45"
+        REQUIRED_CONSECUTIVE_OK: "3"
+        PROBE_INTERVAL_SECONDS: "10"
+        MAX_ATTEMPTS: "40"
+      run: |
+        set -uo pipefail
+        sleep "${MIN_WAIT_SECONDS}"
+        ok=0
+        for i in $(seq 1 "${MAX_ATTEMPTS}"); do
+          if az storage blob list \
+               --auth-mode login \
+               --account-name "${{ inputs.storage_account }}" \
+               --container-name "${{ inputs.container }}" \
+               --num-results 1 --only-show-errors > /dev/null 2>&1; then
+            ok=$((ok + 1))
+            if [ "${ok}" -ge "${REQUIRED_CONSECUTIVE_OK}" ]; then
+              echo "::notice::State ストレージへ ${ok} 回連続で到達できました（${i} 回目の試行）。"
+              exit 0
+            fi
+          else
+            # 1 回でも失敗したら未反映とみなしてカウントをリセットする。
+            ok=0
+          fi
+          sleep "${PROBE_INTERVAL_SECONDS}"
+        done
+        echo "::error::NSP のアクセスルール反映後も State ストレージへ安定して到達できませんでした。"
+        exit 1
+
+    # 失敗時も必ず実行されるよう、呼び出し側で if: always() を付けること。
+    - name: NSP から runner IP を削除
+      if: inputs.mode == 'remove'
+      shell: bash
+      run: |
+        set -uo pipefail
+        az network perimeter profile access-rule delete \
+          --resource-group "${{ inputs.resource_group }}" \
+          --perimeter-name "${{ inputs.perimeter_name }}" \
+          --profile-name "${{ inputs.profile_name }}" \
+          --name "${{ inputs.rule_name }}" \
+          --yes --only-show-errors || true
+        echo "::notice::アクセスルール ${{ inputs.rule_name }} を削除しました。"

@@ -1,0 +1,107 @@
+###############################################################################
+# 再利用可能ワークフロー: 1 つの スタック × 環境 に対する apply
+#
+# cd.yml から環境ごとに呼び出される。
+# 同じ手順を環境ごとに書き写さないことで、
+# 「本番だけ手順が違う」状態が生まれるのを防ぐ。
+#
+# 重要:
+#   plan と apply を同一 job 内で実行し、plan ファイル (tfplan) を
+#   そのまま apply する。別 job に分けて plan を受け渡すと、
+#   その間に state が変化して plan が陳腐化する余地が生まれる。
+###############################################################################
+name: _terraform-apply
+
+on:
+  workflow_call:
+    inputs:
+      stack:
+        required: true
+        type: string
+      env_name:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      subscription_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  apply:
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment }}
+
+    defaults:
+      run:
+        working-directory: stacks/${{ inputs.stack }}
+
+    env:
+      # OIDC のみ。クライアントシークレットは存在しない。
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.ARM_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ inputs.subscription_id }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.4"
+          terraform_wrapper: false
+
+      # State 用ストレージは NSP (Enforced) で保護されており、
+      # publicNetworkAccess = Disabled のままでは到達できない。
+      # GitHub-hosted runner は送信元 IP が動的なため、
+      # 実行のたびに自身の IP を Inbound アクセスルールへ一時登録する。
+      # 詳細は .github/actions/nsp-runner-access/action.yml を参照。
+      - name: NSP に runner IP を一時登録
+        if: ${{ vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: add
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ inputs.subscription_id }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-cd-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+          storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
+
+      # -reconfigure は必須。付け忘れると別環境の state を
+      # コピーしてしまう事故につながる。
+      - name: terraform init
+        run: |
+          terraform init -reconfigure -input=false \
+            -backend-config=envs/${{ inputs.env_name }}/backend.hcl
+
+      - name: terraform plan
+        run: |
+          terraform plan -input=false \
+            -var-file=envs/${{ inputs.env_name }}/terraform.tfvars \
+            -out=tfplan
+
+      - name: terraform apply
+        run: terraform apply -input=false -auto-approve tfplan
+
+      # 失敗時・キャンセル時も必ず一時ルールを削除する。
+      - name: NSP から runner IP を削除
+        if: ${{ always() && vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: remove
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ inputs.subscription_id }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-cd-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+

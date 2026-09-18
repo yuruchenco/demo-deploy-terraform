@@ -1,0 +1,43 @@
+# Terraform
+**/.terraform/*
+.terraform.tfstate.lock.info
+
+# State は必ずリモートバックエンド。ローカル state は絶対にコミットしない。
+*.tfstate
+*.tfstate.*
+
+# plan ファイルは平文の値を含みうるためコミットしない。
+tfplan
+tfplan.*
+*.tfplan
+
+# ローカル検証用のバックエンド上書き。CI では使わない。
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+crash.log
+crash.*.log
+.terraformrc
+terraform.rc
+*.bin
+
+###############################################################################
+# tfvars の扱い
+#
+# 環境別パラメータ（stacks/<stack>/envs/<env>/terraform.tfvars）は
+# 「設定」であって「機密情報」ではないため、必ずコミットする。
+# コミットしないと、どの環境に何が入っているかがコードから追えなくなり、
+# レビューもできなくなる。機密情報は tfvars ではなく
+# GitHub Environments の secrets / Key Vault 参照で扱うこと。
+#
+# 一方、スタック直下の terraform.tfvars は Terraform が
+# 作業ディレクトリ直下として自動読み込みしてしまい、
+# 全環境に暗黙適用される（= 環境間の汚染事故）ため禁止する。
+###############################################################################
+/stacks/*/terraform.tfvars
+/stacks/*/*.auto.tfvars
+
+# 個人のローカル上書き
+*.local.tfvars

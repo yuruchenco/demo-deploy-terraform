@@ -1,0 +1,80 @@
+###############################################################################
+# デプロイ対象の一覧（スタック × 環境）
+#
+# CI/CD のマトリクスはこのファイルから生成する。
+# ワークフロー側にハードコードしないことで、
+# 「どのスタックがどの環境に存在するか」の正本を 1 箇所に保つ。
+#
+# スタック名の数値プレフィックスが適用順序を表す（02_スタック構成）。
+#   00-management-groups    管理グループ階層            （stg / prd のみ）
+#   10-policy               Azure Policy 定義・割り当て
+#   20-connectivity         Hub VNet / Firewall / Bastion / Route Table
+#   21-dns                  Private DNS Zone / DNS Private Resolver
+#   22-gateway              ExpressRoute / VPN Gateway （stg / prd のみ）
+#   30-identity             ID 関連                    （stg / prd のみ）
+#   40-management           Log Analytics / Key Vault
+#   50-subscription-vending サブスクリプション払い出し
+#
+# order は CD の適用順。数値が小さいものから順に適用する。
+#
+# 【設計との差異・要合意】
+#   02_スタック構成では 40-management の依存元を 20-connectivity としているが、
+#   実装上は 20-connectivity の診断設定が 40-management の
+#   Log Analytics ワークスペースを参照するため、依存の向きが逆になる。
+#   本リポジトリでは 40-management を先に適用する順序としている。
+#
+# 追加する際の手順:
+#   1. stacks/<stack>/envs/<env>/ に terraform.tfvars と backend.hcl を作る
+#   2. GitHub Environment を 2 つ作る
+#        <env>-<stack>-plan   … 承認ゲートなし。SP は Reader 相当。
+#        <env>-<stack>        … 本番は承認ゲートあり。SP は Contributor。
+#   3. Entra 側に上記 2 つの subject でフェデレーション資格情報を登録する
+#        repo:<OWNER>/<REPO>:environment:<Environment 名>
+#   4. 各 Environment に variables を設定する
+#        ARM_CLIENT_ID / ARM_TENANT_ID / ARM_SUBSCRIPTION_ID
+#      いずれも secrets ではなく variables でよい（機密情報ではないため）
+#   5. このファイルに追記する
+#
+# 上記が揃っていない スタック × 環境 をここに書くと、
+# OIDC の subject が一致せず CI が失敗する。
+###############################################################################
+deployments:
+  - stack: 10-policy
+    env: dev
+    order: 10
+    environment: dev-10-policy
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
+  - stack: 40-management
+    env: dev
+    order: 20
+    environment: dev-40-management
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
+  - stack: 20-connectivity
+    env: dev
+    order: 30
+    environment: dev-20-connectivity
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
+  - stack: 21-dns
+    env: dev
+    order: 40
+    environment: dev-21-dns
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
+###############################################################################
+# stg / prd は Environment とフェデレーション資格情報が整い次第、有効化する。
+# 22-gateway は dev には存在しない（02_スタック構成のとおり）。
+#
+#  - stack: 22-gateway
+#    env: stg
+#    order: 50
+#    environment: stg-22-gateway
+#    tenant_id: <本番テナント>
+#    subscription_id: <Connectivity サブスクリプション>
+###############################################################################
