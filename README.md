@@ -7,12 +7,15 @@ GitHub Actions（OIDC / シークレットレス）で CI/CD を回すための�
 
 ```
 stacks/                     実行単位（ワーキングディレクトリ）
+├── 00-management-groups/   Management Group 階層                ※dev なし
 ├── 10-policy/              Azure Policy 割り当て
 ├── 20-connectivity/        Hub VNet / Firewall / Bastion / Route Table / DDoS
 ├── 21-dns/                 Private DNS Zones / DNS Private Resolver
-├── 22-gateway/             VNet Gateway (VPN / ExpressRoute)   ※dev なし
+├── 22-gateway/             VNet Gateway (VPN / ExpressRoute)     ※dev なし
+├── 30-identity/            UAMI / カスタムロール / ロール割り当て ※dev なし
 └── 40-management/          Log Analytics / Key Vault
     └── envs/{dev,stg,prd}/ terraform.tfvars（パラメータ）/ backend.hcl（State 接続先）
+modules/                    ローカルモジュール（AVM で表現できないものだけ）
 bootstrap/state-backend.sh  State 用ストレージ + NSP の初期構築
 deployments.yml             CI/CD マトリクスの正本
 .github/
@@ -21,8 +24,52 @@ deployments.yml             CI/CD マトリクスの正本
 └── CODEOWNERS
 ```
 
+スタック分割は詳細設計マトリクス **「02_スタック構成」** を正本とし、
+State の配置は **「04_State配置マトリクス」** に従います。
+
+| スタック | dev | stg | prd | 依存元 |
+|---|:-:|:-:|:-:|---|
+| `00-management-groups` | — | ○ | ○ | — |
+| `10-policy` | ○ | ○ | ○ | `00-management-groups` |
+| `20-connectivity` | ○ | ○ | ○ | — |
+| `21-dns` | △ | ○ | ○ | `20-connectivity` |
+| `22-gateway` | — | ○ | ○ | `20-connectivity` |
+| `30-identity` | — | ○ | ○ | `00-management-groups` |
+| `40-management` | ○ | ○ | ○ | `20-connectivity` |
+| `50-subscription-vending` | ○ | ○ | ○ | **未実装**（下記参照） |
+
+`00-management-groups` / `22-gateway` / `30-identity` はテナント単位または
+dev で作成しないリソースのため、**dev の `envs/` を持ちません**。
+`variables.tf` の `environment` に validation を入れ、誤って dev 用の
+tfvars を作れないようにしています。
+
+> **`50-subscription-vending` が未実装の理由**
+> サブスクリプションの払い出しには EA の Enrollment Account Owner 相当の
+> ロールが必要ですが、本検証アカウントには付与されていないためです。
+> 設計上は dev / stg / prd すべてに存在し、払い出し 1 件につき 1 State
+> （`vending/<subscription-name>.tfstate`）とします（04_State配置マトリクス #8）。
+
 スタックは**ライフサイクル単位**で分割し、それぞれ独立して plan / apply できます。
 環境差分はブランチではなく `envs/<環境>/terraform.tfvars` で表現します。
+
+### `backend.hcl` という拡張子にしている理由
+
+設計書（03_State管理設計）では `-backend-config` に渡すファイルを
+`backend.tfvars` と記載していますが、本リポジトリでは **`backend.hcl`** を採用しています。
+
+1. **`-var-file` のグロブと衝突しない。** tfvars をリソース種別ごとに分割する場合、
+   CI は `envs/<env>/*.tfvars` をまとめて `-var-file` に渡す実装になります。
+   backend 設定が `.tfvars` だと同じディレクトリに同居するためグロブに巻き込まれ、
+   `resource_group_name` 等は変数宣言がないので
+   `Error: Value for undeclared variable` で plan が即失敗します。
+2. **役割がファイル名で自明になる。** `.tfvars` は Terraform 変数、
+   `.hcl` は backend 接続先、と読み手が区別できます。
+3. **CODEOWNERS を分離できる。** `/stacks/**/envs/**/backend.hcl` で
+   State 接続先の変更だけに別の承認者を要求できます。
+
+`-backend-config=<file>` のファイル名は Terraform の仕様上任意であり、
+partial configuration の慣例としてはむしろ `.hcl` が一般的です。
+
 
 ## 前提
 
@@ -92,8 +139,10 @@ larger runner** へ移行し、リポジトリ変数 `NSP_NAME` を未設定に�
 
 | スタック | apply に必要な追加ロール | 理由 |
 |---|---|---|
+| `00-management-groups` | `Management Group Contributor`（tenant root スコープ） | `Microsoft.Management/managementGroups/write`。Entra 全体管理者でも既定ではテナントルートへのアクセス権を持たないため、portal の「アクセス管理」で昇格（elevate access）してから割り当てる |
 | `10-policy` | `Resource Policy Contributor` | `Microsoft.Authorization/policyAssignments/write` |
 | `10-policy` | `User Access Administrator` | DeployIfNotExists の修復用マネージド ID へのロール割り当て |
+| `30-identity` | `User Access Administrator`（管理グループスコープ） | `Microsoft.Authorization/roleDefinitions/write` および `roleAssignments/write` |
 | すべて（NSP 利用時） | `NSP Access Rule Operator`（カスタム） | runner IP の一時登録 / 削除 |
 
 `User Access Administrator` は強力なため、本番では

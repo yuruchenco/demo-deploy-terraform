@@ -13,15 +13,22 @@
 #   22-gateway              ExpressRoute / VPN Gateway （stg / prd のみ）
 #   30-identity             ID 関連                    （stg / prd のみ）
 #   40-management           Log Analytics / Key Vault
-#   50-subscription-vending サブスクリプション払い出し
+#   50-subscription-vending サブスクリプション払い出し  （未実装）
 #
 # order は CD の適用順。数値が小さいものから順に適用する。
 #
 # 【設計との差異・要合意】
-#   02_スタック構成では 40-management の依存元を 20-connectivity としているが、
-#   実装上は 20-connectivity の診断設定が 40-management の
-#   Log Analytics ワークスペースを参照するため、依存の向きが逆になる。
-#   本リポジトリでは 40-management を先に適用する順序としている。
+#   1. 02_スタック構成では 40-management の依存元を 20-connectivity としているが、
+#      実装上は 20-connectivity の診断設定が 40-management の
+#      Log Analytics ワークスペースを参照するため、依存の向きが逆になる。
+#      本リポジトリでは 40-management を先に適用する順序としている。
+#
+#   2. 50-subscription-vending は本検証環境では未実装。
+#      サブスクリプションの払い出しには EA (Enterprise Agreement) の
+#      Enrollment Account Owner 相当のロールが必要だが、
+#      検証用アカウントに当該ロールが付与されていないため。
+#      設計上は 02_スタック構成 #8 のとおり dev / stg / prd すべてに存在し、
+#      払い出し 1 件につき 1 State（vending/<subscription-name>.tfstate）とする。
 #
 # 追加する際の手順:
 #   1. stacks/<stack>/envs/<env>/ に terraform.tfvars と backend.hcl を作る
@@ -75,7 +82,18 @@ deployments:
 
 ###############################################################################
 # stg / prd は Environment とフェデレーション資格情報が整い次第、有効化する。
-# 22-gateway は dev には存在しない（02_スタック構成のとおり）。
+#
+# dev に存在しないスタック（02_スタック構成）:
+#   00-management-groups  テナント単位のリソースのため dev 対象外
+#   22-gateway            dev では Gateway を作成しない
+#   30-identity           テナント単位のリソースでライフサイクルが異なる
+#
+#  - stack: 00-management-groups
+#    env: stg
+#    order: 0
+#    environment: stg-00-management-groups
+#    tenant_id: <本番テナント>
+#    subscription_id: <プロバイダー認証用の任意のサブスクリプション>
 #
 #  - stack: 22-gateway
 #    env: stg
@@ -83,4 +101,11 @@ deployments:
 #    environment: stg-22-gateway
 #    tenant_id: <本番テナント>
 #    subscription_id: <Connectivity サブスクリプション>
+#
+#  - stack: 30-identity
+#    env: stg
+#    order: 60
+#    environment: stg-30-identity
+#    tenant_id: <本番テナント>
+#    subscription_id: <Identity サブスクリプション>
 ###############################################################################
