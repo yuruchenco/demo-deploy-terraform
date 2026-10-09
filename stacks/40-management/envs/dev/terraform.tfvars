@@ -30,4 +30,5 @@ key_vault_soft_delete_days = 7
 tags = {
   CostCenter  = "ccoe"
   Criticality = "low"
+  Environment = "dev"
 }
