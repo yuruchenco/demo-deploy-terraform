@@ -1,7 +1,9 @@
 ###############################################################################
 # CI: Pull Request 時の検証
 #
-# 対象: deployments.yml に定義されたすべての スタック × 環境
+# 対象: deployments.yml のうち、PR で変更のあった スタック × 環境のみ
+#       （選定ルールは .github/scripts/select-deployments.sh）。
+#       共通部品（deployments.yml / modules / CI/CD 定義）が変わった場合は全件。
 #
 # 実行内容: fmt / validate / plan
 # plan 結果は PR 上でレビューし、影響範囲と差分を確認したうえでマージする。
@@ -47,14 +49,19 @@ jobs:
       matrix: ${{ steps.build.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # 変更のあったスタック × 環境だけを対象にする（変更の局所性）。
       - id: build
         run: |
-          matrix=$(yq -o=json -I=0 '.deployments' deployments.yml)
+          matrix=$(bash .github/scripts/select-deployments.sh \
+            "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
-          echo "${matrix}"
 
   plan:
     needs: discover
+    # 対象が無い場合、空の include はエラーになるためスキップする。
+    if: needs.discover.outputs.matrix != '[]'
     name: plan ${{ matrix.env }}/${{ matrix.stack }}
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
 
