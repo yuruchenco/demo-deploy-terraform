@@ -6,6 +6,9 @@
 subscription_id     = "ed77507d-7fd3-4aed-b04c-982b8f58a381"
 assignment_location = "japaneast"
 
+# dev と同一サブスクリプションで検証するため、割り当て名の衝突を避ける。
+assignment_name_suffix = "-stg"
+
 # 既定は false（DoNotEnforce）。まず影響を観測し、
 # 問題がないことを確認してから環境ごとに true へ切り替える。
 enforce = false
