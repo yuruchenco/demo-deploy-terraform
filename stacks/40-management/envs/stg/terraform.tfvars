@@ -1,7 +1,7 @@
 ###############################################################################
 # 40-management スタック / stg（検証）
 ###############################################################################
-subscription_id = "<stg Management サブスクリプション ID>"
+subscription_id = "ed77507d-7fd3-4aed-b04c-982b8f58a381"
 environment     = "stg"
 org             = "masuda"
 location        = "japaneast"

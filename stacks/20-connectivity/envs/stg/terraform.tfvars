@@ -8,7 +8,7 @@
 # subscription_id は本番テナントの Connectivity サブスクリプションを指定する。
 # 環境取り違え時の最後の砦であるため、provider に明示指定している。
 ###############################################################################
-subscription_id = "<stg Connectivity サブスクリプション ID>"
+subscription_id = "ed77507d-7fd3-4aed-b04c-982b8f58a381"
 environment     = "stg"
 org             = "masuda"
 location        = "japaneast"
