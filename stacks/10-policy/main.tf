@@ -8,7 +8,7 @@
 ###############################################################################
 
 locals {
-  subscription_scope     = "/subscriptions/${var.subscription_id}"
+  subscription_scope     = "/subscriptions/${data.azurerm_client_config.current.subscription_id}"
   policy_definition_base = "/providers/Microsoft.Authorization/policyDefinitions"
 
   # Effects that require a managed identity + location + remediation roles.

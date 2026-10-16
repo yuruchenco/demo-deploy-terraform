@@ -1,17 +1,6 @@
 ###############################################################################
 # Core / Naming
 ###############################################################################
-variable "subscription_id" {
-  type        = string
-  description = <<-EOT
-    azurerm プロバイダーの認証コンテキストに使用するサブスクリプション ID。
-
-    管理グループはテナントスコープのリソースのため、ここで指定した
-    サブスクリプションにリソースが作成されるわけではない。
-    プロバイダーの初期化に必要なだけである。
-  EOT
-}
-
 variable "org" {
   type        = string
   description = "Organization prefix used in management group naming (e.g. mg-<org>-<env>)."

@@ -3,7 +3,6 @@
 #
 # 適用: terraform plan -var-file=envs/stg/terraform.tfvars
 ###############################################################################
-subscription_id     = "ed77507d-7fd3-4aed-b04c-982b8f58a381"
 assignment_location = "japaneast"
 
 # dev と同一サブスクリプションで検証するため、割り当て名の衝突を避ける。

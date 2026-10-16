@@ -5,7 +5,7 @@ locals {
   # カスタムロール定義・ロール割り当ての既定スコープ。
   # 管理グループ ID（00-management-groups の output）が与えられていればそれを使い、
   # 無ければサブスクリプションスコープへフォールバックする。
-  subscription_scope = "/subscriptions/${var.subscription_id}"
+  subscription_scope = "/subscriptions/${data.azurerm_client_config.current.subscription_id}"
   default_scope      = coalesce(var.platform_management_group_id, local.subscription_scope)
 
   resource_group_name = one(module.rg[*].name)

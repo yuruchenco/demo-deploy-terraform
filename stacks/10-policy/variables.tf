@@ -1,8 +1,3 @@
-variable "subscription_id" {
-  type        = string
-  description = "Target subscription ID where the built-in policies are assigned."
-}
-
 variable "assignment_name_suffix" {
   description = "割り当て名の末尾に付与する環境識別子（例: -stg）。同一サブスクリプションに複数環境を作る場合の名前衝突を避ける。サブスクリプション スコープの割り当て名は 64 文字以内（GUID 36 文字 + suffix）。"
   type        = string
