@@ -1,11 +1,6 @@
 ###############################################################################
 # Core / Naming
 ###############################################################################
-variable "subscription_id" {
-  type        = string
-  description = "Subscription ID of the Management subscription."
-}
-
 variable "org" {
   type        = string
   description = "Organization prefix used in CAF naming (e.g. rg-<org>-mgmt-...)."

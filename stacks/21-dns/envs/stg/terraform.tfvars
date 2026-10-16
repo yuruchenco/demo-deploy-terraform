@@ -3,12 +3,11 @@
 #
 # hub_virtual_network_id は 20-connectivity/stg の output hub_vnet_id を転記する。
 ###############################################################################
-subscription_id = "ed77507d-7fd3-4aed-b04c-982b8f58a381"
-environment     = "stg"
-org             = "masuda"
-location        = "japaneast"
-location_short  = "jpe"
-instance        = "001"
+environment    = "stg"
+org            = "masuda"
+location       = "japaneast"
+location_short = "jpe"
+instance       = "001"
 
 hub_virtual_network_id = "/subscriptions/ed77507d-7fd3-4aed-b04c-982b8f58a381/resourceGroups/rg-masuda-hub-stg-jpe-001/providers/Microsoft.Network/virtualNetworks/vnet-masuda-hub-stg-jpe-001"
 

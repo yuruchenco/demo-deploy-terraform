@@ -4,12 +4,11 @@
 # Private DNS Zone は変更頻度が低い一方、誤削除・誤リンクの影響が特大となる。
 # 本ファイルの差分は必ず上位承認者がレビューすること。
 ###############################################################################
-subscription_id = "<prd Connectivity サブスクリプション ID>"
-environment     = "prd"
-org             = "masuda"
-location        = "japaneast"
-location_short  = "jpe"
-instance        = "001"
+environment    = "prd"
+org            = "masuda"
+location       = "japaneast"
+location_short = "jpe"
+instance       = "001"
 
 hub_virtual_network_id = "<20-connectivity/prd の hub_vnet_id>"
 

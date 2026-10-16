@@ -90,7 +90,7 @@ jobs:
       ARM_USE_OIDC: "true"
       ARM_CLIENT_ID: ${{ vars.ARM_CLIENT_ID }}
       ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ matrix.subscription_id }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.ARM_SUBSCRIPTION_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +131,7 @@ jobs:
           mode: add
           client_id: ${{ vars.ARM_CLIENT_ID }}
           tenant_id: ${{ vars.ARM_TENANT_ID }}
-          subscription_id: ${{ matrix.subscription_id }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
@@ -199,7 +199,7 @@ jobs:
           mode: remove
           client_id: ${{ vars.ARM_CLIENT_ID }}
           tenant_id: ${{ vars.ARM_TENANT_ID }}
-          subscription_id: ${{ matrix.subscription_id }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}

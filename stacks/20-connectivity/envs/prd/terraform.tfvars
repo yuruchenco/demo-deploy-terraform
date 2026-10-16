@@ -8,12 +8,11 @@
 # 本ファイルの差分 = 本番への影響。
 # CODEOWNERS により上位承認者のレビューを必須としている。
 ###############################################################################
-subscription_id = "<prd Connectivity サブスクリプション ID>"
-environment     = "prd"
-org             = "masuda"
-location        = "japaneast"
-location_short  = "jpe"
-instance        = "001"
+environment    = "prd"
+org            = "masuda"
+location       = "japaneast"
+location_short = "jpe"
+instance       = "001"
 
 # 40-management/prd の output log_analytics_workspace_id を転記する。
 log_analytics_workspace_id = null

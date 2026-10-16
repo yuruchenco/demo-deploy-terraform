@@ -3,7 +3,6 @@
 #
 # 適用: terraform plan -var-file=envs/dev/terraform.tfvars
 ###############################################################################
-subscription_id     = "ed77507d-7fd3-4aed-b04c-982b8f58a381"
 assignment_location = "japaneast"
 
 # 既定は false（DoNotEnforce）。まず影響を観測し、

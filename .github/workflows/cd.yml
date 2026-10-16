@@ -84,7 +84,6 @@ jobs:
       stack: ${{ matrix.stack }}
       env_name: ${{ matrix.env }}
       environment: ${{ matrix.environment }}
-      subscription_id: ${{ matrix.subscription_id }}
 
   apply-stg:
     needs: [discover, apply-dev]
@@ -103,7 +102,6 @@ jobs:
       stack: ${{ matrix.stack }}
       env_name: ${{ matrix.env }}
       environment: ${{ matrix.environment }}
-      subscription_id: ${{ matrix.subscription_id }}
 
   # prd の Environment 側に required reviewers を設定しておくこと。
   # ここに到達した時点で job が待機状態になり、承認されるまで apply されない。
@@ -124,4 +122,3 @@ jobs:
       stack: ${{ matrix.stack }}
       env_name: ${{ matrix.env }}
       environment: ${{ matrix.environment }}
-      subscription_id: ${{ matrix.subscription_id }}

@@ -5,15 +5,14 @@
 #   terraform init -reconfigure -input=false -backend-config=envs/stg/backend.hcl
 #   terraform plan  -var-file=envs/stg/terraform.tfvars -out=tfplan
 #
-# subscription_id は本番テナントの Connectivity サブスクリプションを指定する。
-# 環境取り違え時の最後の砦であるため、provider に明示指定している。
+# サブスクリプションは tfvars に書かず、GitHub Environment の変数 ARM_SUBSCRIPTION_ID で指定する。
+# 環境取り違えは Environment の分離（OIDC subject）で防ぐ。
 ###############################################################################
-subscription_id = "ed77507d-7fd3-4aed-b04c-982b8f58a381"
-environment     = "stg"
-org             = "masuda"
-location        = "japaneast"
-location_short  = "jpe"
-instance        = "001"
+environment    = "stg"
+org            = "masuda"
+location       = "japaneast"
+location_short = "jpe"
+instance       = "001"
 
 # 40-management/stg の output log_analytics_workspace_id を転記する。
 log_analytics_workspace_id = null

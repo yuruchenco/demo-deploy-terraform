@@ -7,12 +7,11 @@
 #
 # Gateway は作成に 30-45 分かかる。
 ###############################################################################
-subscription_id = "<prd Connectivity サブスクリプション ID>"
-environment     = "prd"
-org             = "masuda"
-location        = "japaneast"
-location_short  = "jpe"
-instance        = "001"
+environment    = "prd"
+org            = "masuda"
+location       = "japaneast"
+location_short = "jpe"
+instance       = "001"
 
 resource_group_name = "<20-connectivity/prd の resource_group_name>"
 gateway_subnet_id   = "<20-connectivity/prd の hub_subnet_ids.GatewaySubnet>"

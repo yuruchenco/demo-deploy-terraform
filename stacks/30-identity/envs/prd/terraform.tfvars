@@ -10,12 +10,11 @@
 # 本ファイルの差分は権限そのものの変更となるため、
 # CODEOWNERS により上位承認を要求する。
 ###############################################################################
-subscription_id = "<prd Identity サブスクリプション ID>"
-environment     = "prd"
-org             = "masuda"
-location        = "japaneast"
-location_short  = "jpe"
-instance        = "001"
+environment    = "prd"
+org            = "masuda"
+location       = "japaneast"
+location_short = "jpe"
+instance       = "001"
 
 ###############################################################################
 # 上流スタックからの受け渡し
