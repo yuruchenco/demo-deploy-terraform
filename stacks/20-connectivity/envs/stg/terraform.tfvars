@@ -48,4 +48,5 @@ bastion_zones = []
 tags = {
   CostCenter  = "ccoe"
   Criticality = "medium"
+  Environment = "stg"
 }
