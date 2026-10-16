@@ -54,5 +54,5 @@ bastion_zones = []
 tags = {
   CostCenter  = "ccoe"
   Criticality = "low"
-  environment = "dev"
+  Environment = "sandobox"
 }
