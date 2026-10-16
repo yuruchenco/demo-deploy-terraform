@@ -3,6 +3,17 @@ variable "subscription_id" {
   description = "Target subscription ID where the built-in policies are assigned."
 }
 
+variable "assignment_name_suffix" {
+  description = "割り当て名の末尾に付与する環境識別子（例: -stg）。同一サブスクリプションに複数環境を作る場合の名前衝突を避ける。サブスクリプション スコープの割り当て名は 64 文字以内（GUID 36 文字 + suffix）。"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = length(var.assignment_name_suffix) <= 20
+    error_message = "assignment_name_suffix は 20 文字以内にしてください。"
+  }
+}
+
 variable "assignment_location" {
   type        = string
   description = "Region for the system-assigned managed identity used by DeployIfNotExists / Modify assignments. Ignored for Audit / Deny policies."

@@ -243,7 +243,7 @@ data "azurerm_policy_definition" "identity" {
 resource "azurerm_subscription_policy_assignment" "this" {
   for_each = local.assigned_policies
 
-  name                 = each.key
+  name                 = "${each.key}${var.assignment_name_suffix}"
   display_name         = substr(each.value.display, 0, 128)
   description          = "Managed via Terraform (terraform/policy). Built-in policy ${each.key}."
   subscription_id      = local.subscription_scope
