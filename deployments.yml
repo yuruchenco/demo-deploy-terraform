@@ -80,6 +80,49 @@ deployments:
     tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
     subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
 
+  # stg（検証）。dev と同一サブスクリプションで検証している。00-management-groups はテナント単位のため対象外。
+  - stack: 10-policy
+    env: stg
+    order: 10
+    environment: stg-10-policy
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
+  - stack: 40-management
+    env: stg
+    order: 20
+    environment: stg-40-management
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
+  - stack: 20-connectivity
+    env: stg
+    order: 30
+    environment: stg-20-connectivity
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
+  - stack: 21-dns
+    env: stg
+    order: 40
+    environment: stg-21-dns
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
+  - stack: 22-gateway
+    env: stg
+    order: 50
+    environment: stg-22-gateway
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
+  - stack: 30-identity
+    env: stg
+    order: 60
+    environment: stg-30-identity
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    subscription_id: ed77507d-7fd3-4aed-b04c-982b8f58a381
+
 ###############################################################################
 # stg / prd は Environment とフェデレーション資格情報が整い次第、有効化する。
 #
