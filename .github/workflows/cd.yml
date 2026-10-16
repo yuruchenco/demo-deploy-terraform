@@ -46,21 +46,30 @@ jobs:
       prd: ${{ steps.build.outputs.prd }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - id: build
         run: |
+          # 変更のあった スタック × 環境 だけを対象にする（変更の局所性）。
+          # 手動実行(workflow_dispatch)は全件。
           # order の昇順に並べる。スタック間の依存（20-connectivity の
           # 診断設定が 40-management の LAW を参照する等）があるため、
           # 適用順序は deployments.yml の order を正本とする。
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            sel=$(bash .github/scripts/select-deployments.sh "" all)
+          else
+            sel=$(bash .github/scripts/select-deployments.sh \
+              "${{ github.event.before }}..${{ github.sha }}")
+          fi
           for e in dev stg prd; do
-            m=$(yq -o=json -I=0 \
-              "[.deployments[] | select(.env == \"$e\")] | sort_by(.order)" \
-              deployments.yml)
+            m=$(jq -c --arg e "$e" '[.[] | select(.env == $e)]' <<<"$sel")
             echo "$e=$m" >> "$GITHUB_OUTPUT"
             echo "$e -> $m"
           done
 
   apply-dev:
     needs: discover
+    if: needs.discover.outputs.dev != '[]'
     name: apply dev/${{ matrix.stack }}
     uses: ./.github/workflows/_terraform-apply.yml
     strategy:
@@ -81,7 +90,8 @@ jobs:
     needs: [discover, apply-dev]
     # deployments.yml に該当環境の定義が無い場合は空のマトリクスになる。
     # 空の include を渡すとジョブがエラーになるため、ここでスキップする。
-    if: needs.discover.outputs.stg != '[]'
+    # dev がスキップされた場合も stg を実行できるよう always() を使う。
+    if: always() && needs.apply-dev.result != 'failure' && needs.discover.outputs.stg != '[]'
     name: apply stg/${{ matrix.stack }}
     uses: ./.github/workflows/_terraform-apply.yml
     strategy:
@@ -101,7 +111,8 @@ jobs:
     needs: [discover, apply-dev, apply-stg]
     # stg がスキップされた場合も prd を実行できるよう always() を使う。
     # ただし前段が失敗した場合は進めない。
-    if: always() && needs.apply-dev.result == 'success' && needs.apply-stg.result != 'failure' && needs.discover.outputs.prd != '[]'
+    # dev / stg に変更が無くスキップされた場合も prd を実行できるようにする。
+    if: always() && (needs.apply-dev.result == 'success' || needs.apply-dev.result == 'skipped') && needs.apply-stg.result != 'failure' && needs.discover.outputs.prd != '[]'
     name: apply prd/${{ matrix.stack }}
     uses: ./.github/workflows/_terraform-apply.yml
     strategy:
