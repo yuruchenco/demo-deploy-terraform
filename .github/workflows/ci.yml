@@ -25,11 +25,9 @@
 name: ci
 
 on:
+  # 必須チェック (ci-gate) を常に報告させるため paths で絞らない。
+  # 対象の絞り込みは discover（select-deployments.sh）で行う。
   pull_request:
-    paths:
-      - "stacks/**"
-      - "deployments.yml"
-      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
@@ -205,3 +203,16 @@ jobs:
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
           rule_name: gha-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
 
+  # main の Ruleset で必須チェックに指定する固定名の集約ジョブ。
+  # plan はマトリクスでジョブ名が変動するため、必須チェックには直接指定できない。
+  # 対象なし（plan が skipped）の PR も成功として扱う。
+  ci-gate:
+    name: ci-gate
+    if: always()
+    needs: [discover, plan]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "discover=${{ needs.discover.result }} plan=${{ needs.plan.result }}"
+          [ "${{ needs.discover.result }}" = "success" ] || exit 1
+          case "${{ needs.plan.result }}" in success|skipped) ;; *) exit 1 ;; esac

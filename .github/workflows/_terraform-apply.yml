@@ -5,10 +5,20 @@
 # 同じ手順を環境ごとに書き写さないことで、
 # 「本番だけ手順が違う」状態が生まれるのを防ぐ。
 #
-# 重要:
-#   plan と apply を同一 job 内で実行し、plan ファイル (tfplan) を
-#   そのまま apply する。別 job に分けて plan を受け渡すと、
-#   その間に state が変化して plan が陳腐化する余地が生まれる。
+# 構成（承認対象 = plan 結果）:
+#   1. plan  job : <environment>-plan（承認ゲートなし・Reader 相当の SP）で
+#                  plan -out=tfplan を作成し、結果を Job Summary に出力する。
+#                  tfplan は artifact として apply job へ受け渡す。
+#   2. apply job : <environment>（stg / prd は Required reviewers あり）。
+#                  承認者は 1 の Job Summary を確認したうえで承認する。
+#                  承認後、1 で作成した tfplan をそのまま apply する。
+#
+#   - 差分が無い場合（plan -detailed-exitcode = 0）は apply job を実行しない。
+#     差分なしの承認依頼を出さないことで、承認の形骸化を防ぐ。
+#   - plan から承認までの間に state が変化した場合、Terraform は
+#     "Saved plan is stale" で apply を拒否する（安全側に倒れる）。
+#     その場合は CD を再実行して plan を作り直す。
+#   - tfplan は機微な値を含み得るため、artifact の保持期間は 1 日とする。
 ###############################################################################
 name: _terraform-apply
 
@@ -30,7 +40,102 @@ permissions:
   id-token: write
 
 jobs:
+  plan:
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment }}-plan
+    outputs:
+      has_changes: ${{ steps.plan.outputs.has_changes }}
+
+    defaults:
+      run:
+        working-directory: stacks/${{ inputs.stack }}
+
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.ARM_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.ARM_SUBSCRIPTION_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.4"
+          terraform_wrapper: false
+
+      - name: NSP に runner IP を一時登録
+        if: ${{ vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: add
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-cdp-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+          storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
+
+      - name: terraform init
+        run: |
+          terraform init -reconfigure -input=false \
+            -backend-config=envs/${{ inputs.env_name }}/backend.hcl
+
+      # -detailed-exitcode: 0=差分なし / 1=エラー / 2=差分あり
+      - name: terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -detailed-exitcode \
+            -var-file=envs/${{ inputs.env_name }}/terraform.tfvars \
+            -out=tfplan > plan.txt 2>&1
+          rc=$?
+          set -e
+          cat plan.txt
+          case $rc in
+            0) echo "has_changes=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "has_changes=true"  >> "$GITHUB_OUTPUT" ;;
+            *) exit $rc ;;
+          esac
+
+      # 承認者がレビューする plan 結果。Run 画面の Summary に表示される。
+      - name: plan 結果を Job Summary に出力
+        if: ${{ always() && steps.plan.outcome != 'skipped' }}
+        run: |
+          {
+            echo "### plan: \`${{ inputs.environment }}\`"
+            echo "has_changes: \`${{ steps.plan.outputs.has_changes }}\`"
+            echo '```hcl'
+            sed -n '/Terraform will perform\|No changes\.\|Error/,$p' plan.txt | tail -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: tfplan を受け渡し
+        if: ${{ steps.plan.outputs.has_changes == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: stacks/${{ inputs.stack }}/tfplan
+          retention-days: 1
+
+      - name: NSP から runner IP を削除
+        if: ${{ always() && vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: remove
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-cdp-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+
   apply:
+    needs: plan
+    if: ${{ needs.plan.outputs.has_changes == 'true' }}
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     environment: ${{ inputs.environment }}
 
@@ -79,11 +184,12 @@ jobs:
           terraform init -reconfigure -input=false \
             -backend-config=envs/${{ inputs.env_name }}/backend.hcl
 
-      - name: terraform plan
-        run: |
-          terraform plan -input=false \
-            -var-file=envs/${{ inputs.env_name }}/terraform.tfvars \
-            -out=tfplan
+      # 承認済みの plan ファイルをそのまま適用する（再 plan はしない）。
+      - name: 承認済み tfplan を取得
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: stacks/${{ inputs.stack }}
 
       - name: terraform apply
         run: terraform apply -input=false -auto-approve tfplan
