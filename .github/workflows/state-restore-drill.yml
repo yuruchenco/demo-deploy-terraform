@@ -1,0 +1,116 @@
+###############################################################################
+# State 復旧訓練（手動実行）
+#
+# State ストレージの保護設定（バージョン管理 / 論理削除）で、
+# 「破損（誤った上書き）」「誤削除」から State を復旧できることを
+# ダミー BLOB で確認する。本物の State には触れない。
+#
+# 手順（実運用の復旧手順と同じ）:
+#   1. 正常版を書き込む → 破損版で上書きする → 削除する
+#   2. バージョン一覧から復旧したい版（正常版）の versionId を特定する
+#   3. その版をダウンロードし、同じ BLOB 名で書き戻す
+#   4. 内容が正常版と一致することを確認する
+#
+# 注意:
+#   - 書き戻しで新しい版が作られる。過去版は削除しない
+#     （版の削除には deleteBlobVersion 権限が必要で、CI の SP には与えない）。
+#     過去版の保持期間はライフサイクル管理ポリシーで制御する。
+#   - 実運用では、復旧前に該当スタックの CD を止める（並行 apply の防止）。
+###############################################################################
+name: state-restore-drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 認証に使う GitHub Environment（State へ書込権限を持つ SP）
+        required: true
+        default: dev-10-policy
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  drill:
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ inputs.environment }}
+    env:
+      SA: ${{ vars.STATE_STORAGE_ACCOUNT }}
+      CONTAINER: tfstate
+      BLOB: _drill/${{ github.run_id }}/dummy.tfstate
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: NSP に runner IP を一時登録
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: add
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-drill-${{ github.run_id }}-${{ github.run_attempt }}
+          storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
+
+      - name: 破損・誤削除を再現
+        run: |
+          set -euo pipefail
+          a=(--account-name "$SA" -c "$CONTAINER" -n "$BLOB" --auth-mode login --only-show-errors -o none)
+          echo '{"serial":1,"note":"good"}'    > good.json
+          echo '{"serial":2,"note":"corrupt"}' > bad.json
+          az storage blob upload "${a[@]}" -f good.json --overwrite
+          az storage blob upload "${a[@]}" -f bad.json  --overwrite
+          az storage blob delete "${a[@]}"
+          exists=$(az storage blob exists --account-name "$SA" -c "$CONTAINER" -n "$BLOB" --auth-mode login --query exists -o tsv)
+          echo "削除後の存在確認: ${exists}"
+          [ "$exists" = "false" ]
+
+      - name: 正常版を特定して書き戻す
+        run: |
+          set -euo pipefail
+          echo "### バージョン一覧（削除後）" >> "$GITHUB_STEP_SUMMARY"
+          az storage blob list --account-name "$SA" -c "$CONTAINER" --prefix "$BLOB" \
+            --include v --auth-mode login --only-show-errors \
+            --query "sort_by(@, &versionId)[].{versionId:versionId,current:isCurrentVersion,size:properties.contentLength}" \
+            -o table | tee -a "$GITHUB_STEP_SUMMARY"
+          # 最も古い版 = 正常版（実運用では lastModified と内容で判断する）
+          vid=$(az storage blob list --account-name "$SA" -c "$CONTAINER" --prefix "$BLOB" \
+            --include v --auth-mode login --only-show-errors \
+            --query "sort_by(@, &versionId)[0].versionId" -o tsv)
+          echo "復旧対象 versionId: ${vid}" | tee -a "$GITHUB_STEP_SUMMARY"
+          az storage blob download --account-name "$SA" -c "$CONTAINER" -n "$BLOB" \
+            --version-id "$vid" -f restored.json --auth-mode login --only-show-errors -o none
+          az storage blob upload --account-name "$SA" -c "$CONTAINER" -n "$BLOB" \
+            -f restored.json --auth-mode login --only-show-errors -o none
+
+      - name: 復旧結果を検証
+        run: |
+          set -euo pipefail
+          az storage blob download --account-name "$SA" -c "$CONTAINER" -n "$BLOB" \
+            -f current.json --auth-mode login --only-show-errors -o none
+          cmp good.json current.json
+          echo "::notice::正常版への復旧を確認しました。"
+          echo "結果: 正常版へ復旧成功" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 後片付け（現行版のみ削除）
+        if: always()
+        run: |
+          az storage blob delete --account-name "$SA" -c "$CONTAINER" -n "$BLOB" \
+            --auth-mode login --only-show-errors -o none || true
+
+      - name: NSP から runner IP を削除
+        if: always()
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: remove
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-drill-${{ github.run_id }}-${{ github.run_attempt }}
