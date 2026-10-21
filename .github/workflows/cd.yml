@@ -23,16 +23,26 @@ on:
       - main
     paths:
       - "stacks/**"
+      - "modules/**"
       - "deployments.yml"
       - ".github/workflows/cd.yml"
+      - ".github/workflows/_terraform-apply.yml"
+      - ".github/actions/**"
+      - ".github/scripts/**"
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
+  actions: read
 
 # 同一環境への同時 apply を防ぐ。
 # state のロック競合や、意図しない順序での反映を避けるため。
+#
+# 注意: cancel-in-progress=false でも、同一 group で「待機中」にできる run は 1 つだけ。
+# 承認待ちの間に 2 件以上マージされると、古い待機中 run は自動キャンセルされる。
+# そのため discover の差分範囲は push の before ではなく
+# 「直前に成功した CD run の commit」を起点とし、キャンセルされた run の変更も拾う。
 concurrency:
   group: cd-main
   cancel-in-progress: false
@@ -49,17 +59,26 @@ jobs:
         with:
           fetch-depth: 0
       - id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # 変更のあった スタック × 環境 だけを対象にする（変更の局所性）。
           # 手動実行(workflow_dispatch)は全件。
+          # 差分の起点は直前に成功した CD run の commit（無ければ全件）。
           # order の昇順に並べる。スタック間の依存（20-connectivity の
           # 診断設定が 40-management の LAW を参照する等）があるため、
           # 適用順序は deployments.yml の order を正本とする。
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             sel=$(bash .github/scripts/select-deployments.sh "" all)
           else
-            sel=$(bash .github/scripts/select-deployments.sh \
-              "${{ github.event.before }}..${{ github.sha }}")
+            base=$(gh run list --workflow cd.yml --branch main --status success \
+              --limit 1 --json headSha --jq '.[0].headSha // empty' || true)
+            echo "差分の起点: ${base:-なし（全件）}"
+            if [ -n "$base" ]; then
+              sel=$(bash .github/scripts/select-deployments.sh "${base}..${{ github.sha }}")
+            else
+              sel=$(bash .github/scripts/select-deployments.sh "" all)
+            fi
           fi
           for e in dev stg prd; do
             m=$(jq -c --arg e "$e" '[.[] | select(.env == $e)]' <<<"$sel")
