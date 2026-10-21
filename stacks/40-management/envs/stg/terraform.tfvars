@@ -1,5 +1,5 @@
 ###############################################################################
-# 40-management スタック / stg（検証）
+# 40-management 繧ｹ繧ｿ繝・け / stg・域､懆ｨｼ・・
 ###############################################################################
 environment    = "stg"
 org            = "masuda"
@@ -17,4 +17,5 @@ key_vault_soft_delete_days = 90
 tags = {
   CostCenter  = "ccoe"
   Criticality = "medium"
+  VerifyW1    = "approval-gate"
 }
