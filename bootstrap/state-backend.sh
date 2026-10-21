@@ -8,7 +8,19 @@
 # 再現性を担保する（03_State管理設計 #24）。
 #
 # 使い方:
-#   ./bootstrap/state-backend.sh dev <subscription-id> <client-global-ip>
+#   ./bootstrap/state-backend.sh dev <subscription-id> <client-global-ip> [law-resource-id]
+#
+#   law-resource-id を指定した場合、State の BLOB 操作ログ（読取/書込/削除）を
+#   Log Analytics へ送る診断設定を作成する。State 作成時点では LAW（40-management）が
+#   未作成のことが多いため任意引数とし、40-management 適用後に再実行して付与する。
+#
+# 冪等性: 何度再実行しても同じ状態に収束する（2026-10-21 dev で再実行を検証）。
+#   既存リソースは更新扱い（PUT）となり、State の中身には触れない。
+#   ただし allow-client-ip ルールは実行者の IP で上書きされる点に注意。
+#
+# State 保管先は Terraform 管理外とする（import / prevent_destroy は行わない）。
+#   State を保存する先を、その State 自身で管理する循環を避けるため。
+#   保護は本スクリプトで設定する CanNotDelete ロック・バージョニング・論理削除で担保する。
 #
 # 実行後、stacks/<stack>/envs/<env>/backend.hcl の
 # storage_account_name を本スクリプトが出力した名前に合わせること。
@@ -18,6 +30,7 @@ set -euo pipefail
 ENV_NAME="${1:?usage: state-backend.sh <dev|stg|prd> <subscription-id> <client-ip>}"
 SUBSCRIPTION_ID="${2:?subscription id required}"
 CLIENT_IP="${3:?client global IP required}"
+LAW_ID="${4:-}"
 
 LOCATION="japaneast"
 LOC_SHORT="jpe"
@@ -107,18 +120,43 @@ az network perimeter profile access-rule create \
 SA_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RG_STATE}/providers/Microsoft.Storage/storageAccounts/${SA_NAME}"
 PROFILE_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RG_NSP}/providers/Microsoft.Network/networkSecurityPerimeters/${NSP_NAME}/profiles/${NSP_PROFILE}"
 
-az network perimeter association create \
-  --name "assoc-${SA_NAME}" -g "${RG_NSP}" \
-  --perimeter-name "${NSP_NAME}" \
-  --private-link-resource "{id:${SA_ID}}" \
-  --profile "{id:${PROFILE_ID}}" \
-  --access-mode Enforced -o none
+# 1 リソースに関連付けられる NSP は 1 つのみで、association create は
+# 既存時に Conflict となるため、対象リソース ID で存在確認してから作成する
+# （関連付け名は環境により異なり得るため、名前ではなく ID で判定）。
+EXISTING_ASSOC=$(az network perimeter association list \
+  -g "${RG_NSP}" --perimeter-name "${NSP_NAME}" \
+  --query "[?privateLinkResource.id=='${SA_ID}'].name | [0]" -o tsv)
+if [ -z "${EXISTING_ASSOC}" ]; then
+  az network perimeter association create \
+    --name "assoc-${SA_NAME}" -g "${RG_NSP}" \
+    --perimeter-name "${NSP_NAME}" \
+    --private-link-resource "{id:${SA_ID}}" \
+    --profile "{id:${PROFILE_ID}}" \
+    --access-mode Enforced -o none
+fi
 
 ###############################################################################
 # 6. 誤削除防止ロック
 ###############################################################################
 az lock create --name "lock-tfstate" --lock-type CanNotDelete \
   --resource-group "${RG_STATE}" -o none
+
+###############################################################################
+# 6.5 診断ログ（State への読取/書込/削除の証跡）
+#
+# 誰がいつ State を書き換えたかを追跡するため、BLOB サービスの
+# StorageRead / StorageWrite / StorageDelete を Log Analytics へ送る。
+###############################################################################
+if [ -n "${LAW_ID}" ]; then
+  az monitor diagnostic-settings create \
+    --name "diag-tfstate" \
+    --resource "${SA_ID}/blobServices/default" \
+    --workspace "${LAW_ID}" \
+    --logs '[{"category":"StorageRead","enabled":true},{"category":"StorageWrite","enabled":true},{"category":"StorageDelete","enabled":true}]' \
+    -o none
+else
+  echo "WARN: law-resource-id 未指定のため診断設定をスキップしました。40-management 適用後に再実行してください。" >&2
+fi
 
 ###############################################################################
 # 7. CI/CD 用の最小権限ロール（NSP アクセスルールの一時登録/削除）
