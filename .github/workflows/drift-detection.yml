@@ -1,0 +1,149 @@
+###############################################################################
+# ドリフト検知（09_CI-CD #26 / 13_申し送り事項）
+#
+# 定期的に全スタック × 環境で terraform plan -detailed-exitcode を実行し、
+# 差分（= Portal 直接変更などによるドリフト、または未反映のコード変更）があれば
+# Issue を自動起票する。差分が解消された時点で Issue を自動クローズする。
+#
+# - 実行 Environment は <env>-<stack>-plan（Reader 相当の SP）。apply は行わない。
+# - State ロックは取得しない（-lock=false）。CD の apply と競合させないため。
+#   読み取り専用の plan であり、State を書き換えないため安全。
+# - 是正は「コードを正としてapply」または「実態をコードへ反映するPR」のいずれか。
+#   どちらにするかは Issue 上で判断する（自動是正はしない）。
+###############################################################################
+name: drift-detection
+
+on:
+  schedule:
+    - cron: "0 0 * * 1-5" # 平日 09:00 JST
+  workflow_dispatch:
+    inputs:
+      envs:
+        description: "対象環境（カンマ区切り）"
+        default: "dev,stg"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: drift-detection
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        run: |
+          envs="${{ inputs.envs || vars.DRIFT_TARGET_ENVS || 'dev,stg' }}"
+          all=$(bash .github/scripts/select-deployments.sh "" all)
+          m=$(jq -c --arg e "$envs" '($e | split(",")) as $t | [.[] | select(.env as $x | $t | index($x))]' <<<"$all")
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+          echo "$m"
+
+  drift:
+    needs: discover
+    if: needs.discover.outputs.matrix != '[]'
+    name: drift ${{ matrix.env }}/${{ matrix.stack }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ matrix.environment }}-plan
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include: ${{ fromJson(needs.discover.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: stacks/${{ matrix.stack }}
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.ARM_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.ARM_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.4"
+          terraform_wrapper: false
+
+      - name: NSP に runner IP を一時登録
+        if: ${{ vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: add
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-drift-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
+
+      - name: terraform init
+        run: |
+          terraform init -reconfigure -input=false \
+            -backend-config=envs/${{ matrix.env }}/backend.hcl
+
+      - name: terraform plan (drift)
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock=false -detailed-exitcode \
+            -var-file=envs/${{ matrix.env }}/terraform.tfvars > plan.txt 2>&1
+          rc=$?
+          set -e
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          {
+            echo "### drift ${{ matrix.env }}/${{ matrix.stack }} (exit=$rc)"
+            echo '```'
+            grep -E '^(  [#~+-]|Plan:|No changes|Error)' plan.txt | head -n 200 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$rc" = "1" ] && { cat plan.txt; exit 1; } || true
+
+      # 差分あり: Issue を起票（既存があればコメント追記）。差分なし: 既存 Issue をクローズ。
+      - name: Issue 起票 / クローズ
+        if: ${{ steps.plan.outputs.rc == '0' || steps.plan.outputs.rc == '2' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "[drift] ${{ matrix.env }}/${{ matrix.stack }}"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label drift \
+                  --search "\"$TITLE\" in:title" --json number,title \
+                  --jq ".[] | select(.title == env.TITLE) | .number" | head -n1)
+          if [ "${{ steps.plan.outputs.rc }}" = "2" ]; then
+            body=$(printf '検知 run: %s\n\n```\n%s\n```\n' "$RUN_URL" \
+                   "$(grep -E '^(  [#~+-]|Plan:)' plan.txt | head -n 100)")
+            if [ -n "$num" ]; then
+              gh issue comment "$num" --repo "$GITHUB_REPOSITORY" --body "$body"
+            else
+              gh label create drift --repo "$GITHUB_REPOSITORY" --color D93F0B \
+                --description "Terraform drift" 2>/dev/null || true
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --label drift --body "$body"
+            fi
+          elif [ -n "$num" ]; then
+            gh issue close "$num" --repo "$GITHUB_REPOSITORY" --comment "差分が解消されました: $RUN_URL"
+          fi
+
+      - name: NSP から runner IP を削除
+        if: ${{ always() && vars.NSP_NAME != '' }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: remove
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-drift-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
