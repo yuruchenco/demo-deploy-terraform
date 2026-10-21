@@ -18,3 +18,5 @@ log_analytics_workspace_id = ""
 excluded_policies = []
 not_scopes        = []
 allowed_locations = []
+
+# concurrency test 2
