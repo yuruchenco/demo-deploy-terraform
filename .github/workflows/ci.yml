@@ -49,6 +49,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # tfvars / backend.hcl の環境取り違えを全件検査する（Azure 接続不要）。
+      - name: 環境取り違えチェック（全件）
+        run: bash .github/scripts/check-env-consistency.sh
       # 変更のあったスタック × 環境だけを対象にする（変更の局所性）。
       - id: build
         run: |
@@ -122,6 +125,13 @@ jobs:
       # リモート state を使う段階になったら、
       # リポジトリ変数 USE_REMOTE_STATE = "true" を設定する。
       # ワークフローの書き換えは不要。
+      # GitHub Environment 変数（State 格納先）と backend.hcl の一致を確認する。
+      - name: 環境取り違えチェック（Environment 変数）
+        if: ${{ vars.USE_REMOTE_STATE == 'true' }}
+        run: |
+          bash "$GITHUB_WORKSPACE/.github/scripts/check-env-consistency.sh" \
+            "${{ matrix.stack }}" "${{ matrix.env }}" "${{ vars.STATE_STORAGE_ACCOUNT }}"
+
       - name: NSP に runner IP を一時登録
         if: ${{ vars.USE_REMOTE_STATE == 'true' && vars.NSP_NAME != '' }}
         uses: ./.github/actions/nsp-runner-access

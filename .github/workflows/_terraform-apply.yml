@@ -64,6 +64,12 @@ jobs:
           terraform_version: "1.14.4"
           terraform_wrapper: false
 
+      # Environment 変数（State 格納先）と tfvars / backend.hcl の取り違えを apply 前に止める。
+      - name: 環境取り違えチェック
+        run: |
+          bash "$GITHUB_WORKSPACE/.github/scripts/check-env-consistency.sh" \
+            "${{ inputs.stack }}" "${{ inputs.env_name }}" "${{ vars.STATE_STORAGE_ACCOUNT }}"
+
       - name: NSP に runner IP を一時登録
         if: ${{ vars.NSP_NAME != '' }}
         uses: ./.github/actions/nsp-runner-access

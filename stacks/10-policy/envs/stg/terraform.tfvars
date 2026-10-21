@@ -3,6 +3,7 @@
 #
 # 適用: terraform plan -var-file=envs/stg/terraform.tfvars
 ###############################################################################
+environment         = "stg"
 assignment_location = "japaneast"
 
 # dev と同一サブスクリプションで検証するため、割り当て名の衝突を避ける。

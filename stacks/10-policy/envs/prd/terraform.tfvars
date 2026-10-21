@@ -3,6 +3,7 @@
 #
 # 適用: terraform plan -var-file=envs/prd/terraform.tfvars
 ###############################################################################
+environment         = "prd"
 assignment_location = "japaneast"
 
 # 既定は false（DoNotEnforce）。まず影響を観測し、
