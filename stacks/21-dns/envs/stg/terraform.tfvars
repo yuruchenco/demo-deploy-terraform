@@ -3,7 +3,7 @@
 #
 # hub_virtual_network_id は 20-connectivity/stg の output hub_vnet_id を転記する。
 ###############################################################################
-environment = "dev"
+environment    = "stg"
 org            = "masuda"
 location       = "japaneast"
 location_short = "jpe"
