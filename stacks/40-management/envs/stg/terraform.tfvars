@@ -17,5 +17,4 @@ key_vault_soft_delete_days = 90
 tags = {
   CostCenter  = "ccoe"
   Criticality = "medium"
-  "Verify/W4" = "apply-failure"
 }
