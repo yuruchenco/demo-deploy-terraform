@@ -1,0 +1,96 @@
+###############################################################################
+# 払い出し専用 SP / Environment の分離検証（詳細設計マトリクス 01 #36・#13）
+#
+#   isolation : dev-50-subscription-vending（承認必須・main のみ）で専用 SP にログインし、
+#               State へのアクセスが 50-subscription-vending/ 配下に限定されることを確認する
+#   wrong-env : 承認なしの別 Environment から専用 SP の client-id でログインを試み、
+#               OIDC フェデレーションで拒否されることを確認する
+###############################################################################
+name: verify-vending-isolation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  VENDING_CLIENT_ID: 86d1fd77-77b1-49b4-872f-b383b89ef634
+
+jobs:
+  wrong-env:
+    runs-on: ubuntu-latest
+    environment: dev-10-policy-plan
+    steps:
+      - name: 専用 SP で別 Environment からログイン（失敗が期待値）
+        id: login
+        continue-on-error: true
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.VENDING_CLIENT_ID }}
+          tenant-id: ${{ vars.ARM_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: 判定
+        run: |
+          echo "login outcome = ${{ steps.login.outcome }}"
+          if [ "${{ steps.login.outcome }}" != "failure" ]; then
+            echo "::error::別 Environment から専用 SP でログインできてしまった"; exit 1
+          fi
+          echo "PASS: 専用 SP は dev-50-subscription-vending 以外の Environment から使用できない"
+
+  isolation:
+    runs-on: ubuntu-latest
+    environment: dev-50-subscription-vending
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.ARM_CLIENT_ID }}
+          tenant-id: ${{ vars.ARM_TENANT_ID }}
+          subscription-id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+      - name: NSP に runner IP を一時登録
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: add
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-vvi-${{ github.run_id }}-${{ github.run_attempt }}
+          storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
+      - name: State アクセス範囲の判定
+        run: |
+          sa="${{ vars.STATE_STORAGE_ACCOUNT }}"; fail=0
+          try() { az storage blob "$@" --account-name "$sa" -c tfstate --auth-mode login -o none 2>/tmp/err; }
+          expect() { # $1=期待(ok|deny) $2=説明 以降=コマンド
+            want=$1; desc=$2; shift 2
+            if try "$@"; then got=ok; else got=deny; fi
+            msg=$(grep -o 'AuthorizationPermissionMismatch\|AuthorizationFailure\|BlobNotFound' /tmp/err | head -1)
+            if [ "$got" = "$want" ]; then echo "PASS [$want] $desc ${msg}"; else echo "::error::FAIL [want=$want got=$got] $desc ${msg}"; cat /tmp/err; fail=1; fi
+          }
+          echo test > /tmp/t.txt
+          expect ok   "自スタック State の読み取り (50-subscription-vending/sub-sample-a.tfstate)" download -n 50-subscription-vending/sub-sample-a.tfstate -f /tmp/a
+          expect ok   "自スタック配下への書き込み・削除"  upload -n 50-subscription-vending/zz-verify.txt -f /tmp/t.txt --overwrite
+          expect ok   "自スタック配下の削除"              delete -n 50-subscription-vending/zz-verify.txt
+          expect deny "他スタック State の読み取り (10-policy.tfstate)"   download -n 10-policy.tfstate -f /tmp/b
+          expect deny "他スタック State の読み取り (20-connectivity.tfstate)" download -n 20-connectivity.tfstate -f /tmp/c
+          expect deny "他スタック位置への書き込み (zz-verify.txt)"        upload -n zz-verify.txt -f /tmp/t.txt --overwrite
+          if az storage blob list --account-name sttfstatettsstgjpe01 -c tfstate --auth-mode login -o none 2>/tmp/err; then
+            echo "::error::FAIL stg State に到達できた"; fail=1
+          else echo "PASS [deny] stg State への到達 $(grep -o 'AuthorizationPermissionMismatch\|AuthorizationFailure' /tmp/err | head -1)"; fi
+          exit $fail
+      - name: NSP から runner IP を削除
+        if: ${{ always() }}
+        uses: ./.github/actions/nsp-runner-access
+        with:
+          mode: remove
+          client_id: ${{ vars.ARM_CLIENT_ID }}
+          tenant_id: ${{ vars.ARM_TENANT_ID }}
+          subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
+          perimeter_name: ${{ vars.NSP_NAME }}
+          profile_name: ${{ vars.NSP_PROFILE_NAME }}
+          rule_name: gha-vvi-${{ github.run_id }}-${{ github.run_attempt }}

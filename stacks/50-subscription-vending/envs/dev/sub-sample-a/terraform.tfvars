@@ -11,4 +11,5 @@ department        = "sales"
 tags = {
   CostCenter  = "sales"
   Criticality = "low"
+  Owner       = "ccoe"
 }
