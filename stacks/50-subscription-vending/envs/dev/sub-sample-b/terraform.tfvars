@@ -10,5 +10,5 @@ department        = "engineering"
 
 tags = {
   CostCenter  = "engineering"
-  Criticality = "low"
+  Criticality = "medium"
 }
