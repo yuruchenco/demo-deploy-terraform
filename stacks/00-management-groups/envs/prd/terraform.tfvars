@@ -35,12 +35,14 @@ level1_management_groups = {
   decommissioned = { display_name = "Decommissioned" }
 }
 
+# mig: 移行用（Landing Zones 配下）。移行完了後は corp へ移動する（詳細設計マトリクス 13 #44）
 level2_management_groups = {
   identity     = { display_name = "Identity", parent_key = "platform" }
   management   = { display_name = "Management", parent_key = "platform" }
   connectivity = { display_name = "Connectivity", parent_key = "platform" }
   corp         = { display_name = "Corp", parent_key = "landingzones" }
   online       = { display_name = "Online", parent_key = "landingzones" }
+  mig          = { display_name = "Migration", parent_key = "landingzones" }
 }
 
 ###############################################################################
