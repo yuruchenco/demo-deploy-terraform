@@ -34,6 +34,18 @@ on:
       environment:
         required: true
         type: string
+      # ??????????????????envs/<env> ??? envs/<env>/<instance>?
+      config_dir:
+        required: true
+        type: string
+      # ??????????<stack>[-<instance>]??NSP ?????artifact ?????
+      slug:
+        required: true
+        type: string
+      instance:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -68,7 +80,7 @@ jobs:
       - name: 環境取り違えチェック
         run: |
           bash "$GITHUB_WORKSPACE/.github/scripts/check-env-consistency.sh" \
-            "${{ inputs.stack }}" "${{ inputs.env_name }}" "${{ vars.STATE_STORAGE_ACCOUNT }}"
+            "${{ inputs.stack }}" "${{ inputs.env_name }}" "${{ vars.STATE_STORAGE_ACCOUNT }}" "${{ inputs.instance }}"
 
       - name: NSP に runner IP を一時登録
         if: ${{ vars.NSP_NAME != '' }}
@@ -81,13 +93,13 @@ jobs:
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
-          rule_name: gha-cdp-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+          rule_name: gha-cdp-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.slug }}
           storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
 
       - name: terraform init
         run: |
           terraform init -reconfigure -input=false \
-            -backend-config=envs/${{ inputs.env_name }}/backend.hcl
+            -backend-config=${{ inputs.config_dir }}/backend.hcl
 
       # -detailed-exitcode: 0=差分なし / 1=エラー / 2=差分あり
       - name: terraform plan
@@ -95,7 +107,7 @@ jobs:
         run: |
           set +e
           terraform plan -input=false -no-color -detailed-exitcode \
-            -var-file=envs/${{ inputs.env_name }}/terraform.tfvars \
+            -var-file=${{ inputs.config_dir }}/terraform.tfvars \
             -out=tfplan > plan.txt 2>&1
           rc=$?
           set -e
@@ -111,7 +123,7 @@ jobs:
         if: ${{ always() && steps.plan.outcome != 'skipped' }}
         run: |
           {
-            echo "### plan: \`${{ inputs.environment }}\`"
+            echo "### plan: \`${{ inputs.environment }}\` / \`${{ inputs.slug }}\`"
             echo "has_changes: \`${{ steps.plan.outputs.has_changes }}\`"
             echo '```hcl'
             sed -n '/Terraform will perform\|No changes\.\|Error/,$p' plan.txt | tail -c 60000
@@ -122,7 +134,7 @@ jobs:
         if: ${{ steps.plan.outputs.has_changes == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan-${{ inputs.environment }}
+          name: tfplan-${{ inputs.environment }}-${{ inputs.slug }}
           path: stacks/${{ inputs.stack }}/tfplan
           retention-days: 1
 
@@ -137,7 +149,7 @@ jobs:
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
-          rule_name: gha-cdp-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+          rule_name: gha-cdp-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.slug }}
 
   apply:
     needs: plan
@@ -180,7 +192,7 @@ jobs:
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
-          rule_name: gha-cd-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+          rule_name: gha-cd-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.slug }}
           storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
 
       # -reconfigure は必須。付け忘れると別環境の state を
@@ -188,13 +200,13 @@ jobs:
       - name: terraform init
         run: |
           terraform init -reconfigure -input=false \
-            -backend-config=envs/${{ inputs.env_name }}/backend.hcl
+            -backend-config=${{ inputs.config_dir }}/backend.hcl
 
       # 承認済みの plan ファイルをそのまま適用する（再 plan はしない）。
       - name: 承認済み tfplan を取得
         uses: actions/download-artifact@v4
         with:
-          name: tfplan-${{ inputs.environment }}
+          name: tfplan-${{ inputs.environment }}-${{ inputs.slug }}
           path: stacks/${{ inputs.stack }}
 
       - name: terraform apply
@@ -212,5 +224,5 @@ jobs:
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
-          rule_name: gha-cd-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stack }}
+          rule_name: gha-cd-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.slug }}
 

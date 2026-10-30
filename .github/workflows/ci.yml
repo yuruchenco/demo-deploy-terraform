@@ -63,7 +63,7 @@ jobs:
     needs: discover
     # 対象が無い場合、空の include はエラーになるためスキップする。
     if: needs.discover.outputs.matrix != '[]'
-    name: plan ${{ matrix.env }}/${{ matrix.stack }}
+    name: plan ${{ matrix.env }}/${{ matrix.slug }}
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
 
     # Environment を指定することで、OIDC の subject が
@@ -130,7 +130,7 @@ jobs:
         if: ${{ vars.USE_REMOTE_STATE == 'true' }}
         run: |
           bash "$GITHUB_WORKSPACE/.github/scripts/check-env-consistency.sh" \
-            "${{ matrix.stack }}" "${{ matrix.env }}" "${{ vars.STATE_STORAGE_ACCOUNT }}"
+            "${{ matrix.stack }}" "${{ matrix.env }}" "${{ vars.STATE_STORAGE_ACCOUNT }}" "${{ matrix.instance }}"
 
       - name: NSP に runner IP を一時登録
         if: ${{ vars.USE_REMOTE_STATE == 'true' && vars.NSP_NAME != '' }}
@@ -143,14 +143,14 @@ jobs:
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
-          rule_name: gha-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          rule_name: gha-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.slug }}
           storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
 
       - name: terraform init (リモート state)
         if: ${{ vars.USE_REMOTE_STATE == 'true' }}
         run: |
           terraform init -reconfigure -input=false \
-            -backend-config=envs/${{ matrix.env }}/backend.hcl
+            -backend-config=${{ matrix.dir }}/backend.hcl
 
       - name: terraform init (ローカル state / 既定)
         if: ${{ vars.USE_REMOTE_STATE != 'true' }}
@@ -171,7 +171,7 @@ jobs:
         run: |
           set -o pipefail
           terraform plan -input=false -no-color \
-            -var-file=envs/${{ matrix.env }}/terraform.tfvars \
+            -var-file=${{ matrix.dir }}/terraform.tfvars \
             -out=tfplan 2>&1 | tee plan.txt
 
       # plan の中身は環境情報を含むため、成果物としては保持せず
@@ -196,7 +196,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `### plan: \`${{ matrix.env }}/${{ matrix.stack }}\`\n\n<details><summary>結果を表示</summary>\n\n\`\`\`hcl\n${body}\n\`\`\`\n\n</details>`
+              body: `### plan: \`${{ matrix.env }}/${{ matrix.slug }}\`\n\n<details><summary>結果を表示</summary>\n\n\`\`\`hcl\n${body}\n\`\`\`\n\n</details>`
             });
 
       # 失敗時・キャンセル時も必ず一時ルールを削除する。
@@ -211,7 +211,7 @@ jobs:
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
-          rule_name: gha-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          rule_name: gha-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.slug }}
 
   # main の Ruleset で必須チェックに指定する固定名の集約ジョブ。
   # plan はマトリクスでジョブ名が変動するため、必須チェックには直接指定できない。
