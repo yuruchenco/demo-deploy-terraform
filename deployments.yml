@@ -84,7 +84,15 @@ deployments:
     tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
     instances: auto
 
-  # stg（検証）。dev と同一サブスクリプションで検証している。00-management-groups はテナント単位のため対象外。
+  # stg（検証）。dev と同一サブスクリプションで検証している。
+  # 00-management-groups はテナント単位。検証テナントでは中間ルート mg-<org>-stg 配下に階層を作る。
+  # apply は専用 SP（tenant root の Management Group Contributor）を使い、承認必須・main のみ。
+  - stack: 00-management-groups
+    env: stg
+    order: 0
+    environment: stg-00-management-groups
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+
   - stack: 10-policy
     env: stg
     order: 10
@@ -128,12 +136,6 @@ deployments:
 #   00-management-groups  テナント単位のリソースのため dev 対象外
 #   22-gateway            dev では Gateway を作成しない
 #   30-identity           テナント単位のリソースでライフサイクルが異なる
-#
-#  - stack: 00-management-groups
-#    env: stg
-#    order: 0
-#    environment: stg-00-management-groups
-#    tenant_id: <本番テナント>
 #
 #  - stack: 22-gateway
 #    env: stg
