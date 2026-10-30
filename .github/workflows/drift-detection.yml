@@ -50,7 +50,7 @@ jobs:
   drift:
     needs: discover
     if: needs.discover.outputs.matrix != '[]'
-    name: drift ${{ matrix.env }}/${{ matrix.stack }}
+    name: drift ${{ matrix.env }}/${{ matrix.slug }}
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     environment: ${{ matrix.environment }}-plan
     strategy:
@@ -85,25 +85,25 @@ jobs:
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
-          rule_name: gha-drift-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          rule_name: gha-drift-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.slug }}
           storage_account: ${{ vars.STATE_STORAGE_ACCOUNT }}
 
       - name: terraform init
         run: |
           terraform init -reconfigure -input=false \
-            -backend-config=envs/${{ matrix.env }}/backend.hcl
+            -backend-config=${{ matrix.dir }}/backend.hcl
 
       - name: terraform plan (drift)
         id: plan
         run: |
           set +e
           terraform plan -input=false -no-color -lock=false -detailed-exitcode \
-            -var-file=envs/${{ matrix.env }}/terraform.tfvars > plan.txt 2>&1
+            -var-file=${{ matrix.dir }}/terraform.tfvars > plan.txt 2>&1
           rc=$?
           set -e
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
           {
-            echo "### drift ${{ matrix.env }}/${{ matrix.stack }} (exit=$rc)"
+            echo "### drift ${{ matrix.env }}/${{ matrix.slug }} (exit=$rc)"
             echo '```'
             grep -E '^(  [#~+-]|Plan:|No changes|Error)' plan.txt | head -n 200 || true
             echo '```'
@@ -115,7 +115,7 @@ jobs:
         if: ${{ steps.plan.outputs.rc == '0' || steps.plan.outputs.rc == '2' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          TITLE: "[drift] ${{ matrix.env }}/${{ matrix.stack }}"
+          TITLE: "[drift] ${{ matrix.env }}/${{ matrix.slug }}"
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label drift \
@@ -146,4 +146,4 @@ jobs:
           resource_group: ${{ vars.NSP_RESOURCE_GROUP }}
           perimeter_name: ${{ vars.NSP_NAME }}
           profile_name: ${{ vars.NSP_PROFILE_NAME }}
-          rule_name: gha-drift-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          rule_name: gha-drift-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.slug }}

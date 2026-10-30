@@ -13,7 +13,7 @@
 #   22-gateway              ExpressRoute / VPN Gateway （stg / prd のみ）
 #   30-identity             ID 関連                    （stg / prd のみ）
 #   40-management           Log Analytics / Key Vault
-#   50-subscription-vending サブスクリプション払い出し  （未実装）
+#   50-subscription-vending サブスクリプション払い出し  （instances: auto / dev で検証）
 #
 # order は CD の適用順。数値が小さいものから順に適用する。
 #
@@ -23,12 +23,10 @@
 #      Log Analytics ワークスペースを参照するため、依存の向きが逆になる。
 #      本リポジトリでは 40-management を先に適用する順序としている。
 #
-#   2. 50-subscription-vending は本検証環境では未実装。
-#      サブスクリプションの払い出しには EA (Enterprise Agreement) の
-#      Enrollment Account Owner 相当のロールが必要だが、
-#      検証用アカウントに当該ロールが付与されていないため。
-#      設計上は 02_スタック構成 #8 のとおり dev / stg / prd すべてに存在し、
-#      払い出し 1 件につき 1 State（vending/<subscription-name>.tfstate）とする。
+#   2. 50-subscription-vending は State 分割方式の検証用最小実装（dev のみ）。
+#      サブスクリプションの払い出しには EA / MCA の請求ロールが必要だが、
+#      検証用アカウントに当該ロールが無いため、払い出しの代わりに RG を作成する。
+#      払い出し 1 件につき 1 State（50-subscription-vending/<subscription-name>.tfstate）。
 #
 # 追加する際の手順:
 #   1. stacks/<stack>/envs/<env>/ に terraform.tfvars と backend.hcl を作る
@@ -75,6 +73,16 @@ deployments:
     order: 40
     environment: dev-21-dns
     tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+
+  # instances: auto … stacks/<stack>/envs/<env>/ 直下のサブディレクトリを
+  # 1 払い出し = 1 State として自動展開する（select-deployments.sh）。
+  # 払い出しの追加はディレクトリ追加のみ。Environment は全払い出しで共用する。
+  - stack: 50-subscription-vending
+    env: dev
+    order: 80
+    environment: dev-50-subscription-vending
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+    instances: auto
 
   # stg（検証）。dev と同一サブスクリプションで検証している。00-management-groups はテナント単位のため対象外。
   - stack: 10-policy
