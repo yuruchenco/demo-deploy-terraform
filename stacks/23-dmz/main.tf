@@ -101,6 +101,11 @@ resource "azurerm_public_ip" "appgw" {
   sku                 = "Standard"
   zones               = var.app_gateway_zones
   tags                = local.tags
+
+  # 検証テナントの Policy が ipTags (FirstPartyUsage) を自動付与し、ip_tags は ForceNew のため置き換えが発生する。
+  lifecycle {
+    ignore_changes = [ip_tags]
+  }
 }
 
 resource "azurerm_application_gateway" "this" {
