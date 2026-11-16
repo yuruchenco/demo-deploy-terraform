@@ -12,6 +12,7 @@ stacks/                     実行単位（ワーキングディレクトリ）
 ├── 20-connectivity/        Hub VNet / Firewall / Bastion / Route Table / DDoS
 ├── 21-dns/                 Private DNS Zones / DNS Private Resolver
 ├── 22-gateway/             VNet Gateway (VPN / ExpressRoute)     ※dev なし
+├── 23-dmz/                 DMZ VNet / App Gateway (WAF_v2) / Hub とのピアリング（DMZ サブスクリプション）
 ├── 30-identity/            UAMI / カスタムロール / ロール割り当て ※dev なし
 └── 40-management/          Log Analytics / Key Vault
     └── envs/{dev,stg,prd}/ terraform.tfvars（パラメータ）/ backend.hcl（State 接続先）
@@ -34,6 +35,7 @@ State の配置は **「04_State配置マトリクス」** に従います。
 | `20-connectivity` | ○ | ○ | ○ | — |
 | `21-dns` | △ | ○ | ○ | `20-connectivity` |
 | `22-gateway` | — | ○ | ○ | `20-connectivity` |
+| `23-dmz` | ○ | — | — | `20-connectivity`, `40-management` |
 | `30-identity` | — | ○ | ○ | `00-management-groups` |
 | `40-management` | ○ | ○ | ○ | `20-connectivity` |
 | `50-subscription-vending` | ○ | ○ | ○ | **未実装**（下記参照） |
@@ -42,6 +44,17 @@ State の配置は **「04_State配置マトリクス」** に従います。
 dev で作成しないリソースのため、**dev の `envs/` を持ちません**。
 `variables.tf` の `environment` に validation を入れ、誤って dev 用の
 tfvars を作れないようにしています。
+
+> **`23-dmz` と 2 サブスクリプション構成**
+> Hub（00/10/20/21/22/40）と DMZ（23）を別サブスクリプションで運用する構成の検証用です。
+> 対象サブスクリプションは Environment `dev-23-dmz(-plan)` の `ARM_SUBSCRIPTION_ID` で切り替え、
+> State 用 NSP の操作にはリポジトリ変数 `STATE_SUBSCRIPTION_ID` を使います。
+> Hub とのピアリングは双方向とも 23-dmz が作成します（AVM の `create_reverse_peering`。
+> provider の追加は不要）。DMZ 用 SP の権限は DMZ 用 RG の Contributor、Hub VNet への
+> カスタムロール `Hub VNet Peering Operator`、ABAC で `23-dmz.tfstate` に限定した
+> Storage Blob Data Contributor、NSP Access Rule Operator です。
+> 検証テナントのサブスクリプションは 1 つのため、DMZ サブスクリプションは同一サブスクリプション内の
+> RG `rg-masuda-dmz-dev-jpe-001` で代替しています。
 
 > **`50-subscription-vending` が未実装の理由**
 > サブスクリプションの払い出しには EA の Enrollment Account Owner 相当の

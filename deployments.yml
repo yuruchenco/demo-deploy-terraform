@@ -11,6 +11,7 @@
 #   20-connectivity         Hub VNet / Firewall / Bastion / Route Table
 #   21-dns                  Private DNS Zone / DNS Private Resolver
 #   22-gateway              ExpressRoute / VPN Gateway （stg / prd のみ）
+#   23-dmz                  DMZ VNet / App Gateway / Hub とのピアリング（DMZ サブスクリプション）
 #   30-identity             ID 関連                    （stg / prd のみ）
 #   40-management           Log Analytics / Key Vault
 #   50-subscription-vending サブスクリプション払い出し  （instances: auto / dev で検証）
@@ -27,6 +28,14 @@
 #      サブスクリプションの払い出しには EA / MCA の請求ロールが必要だが、
 #      検証用アカウントに当該ロールが無いため、払い出しの代わりに RG を作成する。
 #      払い出し 1 件につき 1 State（50-subscription-vending/<subscription-name>.tfstate）。
+#
+#   3. 10-policy は最後（50 を除く）に適用する。Policy の割り当てが 40-management の
+#      Log Analytics 等のリソース ID を参照するため。
+#
+#   4. 23-dmz は DMZ サブスクリプションを対象とする（Environment の ARM_SUBSCRIPTION_ID）。
+#      State は Hub と同じ環境別ストレージに置き、State 側の操作には
+#      リポジトリ変数 STATE_SUBSCRIPTION_ID を使う。Hub とのピアリングは双方向とも
+#      23-dmz が作成するため、20-connectivity より後に適用する。
 #
 # 追加する際の手順:
 #   1. stacks/<stack>/envs/<env>/ に terraform.tfvars と backend.hcl を作る
@@ -50,12 +59,6 @@
 # OIDC の subject が一致せず CI が失敗する。
 ###############################################################################
 deployments:
-  - stack: 10-policy
-    env: dev
-    order: 10
-    environment: dev-10-policy
-    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
-
   - stack: 40-management
     env: dev
     order: 20
@@ -72,6 +75,19 @@ deployments:
     env: dev
     order: 40
     environment: dev-21-dns
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+
+  # DMZ サブスクリプション。Environment の ARM_SUBSCRIPTION_ID / ARM_CLIENT_ID は DMZ 用。
+  - stack: 23-dmz
+    env: dev
+    order: 60
+    environment: dev-23-dmz
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+
+  - stack: 10-policy
+    env: dev
+    order: 70
+    environment: dev-10-policy
     tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
 
   # instances: auto … stacks/<stack>/envs/<env>/ 直下のサブディレクトリを
@@ -91,12 +107,6 @@ deployments:
     env: stg
     order: 0
     environment: stg-00-management-groups
-    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
-
-  - stack: 10-policy
-    env: stg
-    order: 10
-    environment: stg-10-policy
     tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
 
   - stack: 40-management
@@ -127,6 +137,12 @@ deployments:
     env: stg
     order: 60
     environment: stg-30-identity
+    tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
+
+  - stack: 10-policy
+    env: stg
+    order: 70
+    environment: stg-10-policy
     tenant_id: e684f651-131b-4e1a-aae7-63232c55ecb0
 
 ###############################################################################

@@ -34,6 +34,9 @@ inputs:
   tenant_id:
     required: true
   subscription_id:
+    description: >-
+      NSP（State 用ストレージ）があるサブスクリプション。デプロイ先（ARM_SUBSCRIPTION_ID）とは
+      異なり得るため、呼び出し側は STATE_SUBSCRIPTION_ID を優先して渡す。
     required: true
   resource_group:
     description: NSP のリソースグループ
