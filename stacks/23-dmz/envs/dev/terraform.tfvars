@@ -23,7 +23,7 @@ dmz_vnet_address_space      = ["10.11.0.0/24"]
 appgw_subnet_address_prefix = "10.11.0.0/26"
 
 # 検証のため一時的に作成する（確認後 false に戻して削除する）。
-deploy_app_gateway   = true
+deploy_app_gateway   = false
 app_gateway_capacity = 1
 app_gateway_zones    = []
 
